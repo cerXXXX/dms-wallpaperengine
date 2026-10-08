@@ -362,9 +362,41 @@ function sanitizeSceneOverrides(overrides) {
     return out
 }
 
-// output settings with the scene's overrides applied on top
-function mergeSceneOverrides(outputSettings, overrides) {
-    return Object.assign({}, outputSettings || {}, sanitizeSceneOverrides(overrides))
+// Where a scene's project.json may be, in lookup order: one place for paths and custom roots, every
+// Steam candidate otherwise (the discovered Steam path may not be known yet when this is needed)
+function projectJsonCandidates(sceneId, backgroundsDir, steamPaths) {
+    if (!sceneId) return []
+    if (sceneId.indexOf("/") !== -1 || backgroundsDir) {
+        return [sceneFolderPath(sceneId, backgroundsDir, "") + "/project.json"]
+    }
+    var out = []
+    for (var i = 0; i < steamPaths.length; i++) {
+        out.push(sceneFolderPath(sceneId, "", steamPaths[i]) + "/project.json")
+    }
+    return out
+}
+
+// Wallpaper type from a project.json's text ("scene", "video", "web"), "" when unreadable
+function wallpaperTypeFromProject(text) {
+    try {
+        return String(JSON.parse(text).type || "").toLowerCase()
+    } catch (e) {
+        return ""
+    }
+}
+
+// The output's FPS for this kind of wallpaper: videos use videoFps (the plain fps until it is set),
+// scenes and web wallpapers use fps. videoFps itself is dropped so changing it only relaunches videos.
+function outputSettingsForType(outputSettings, wallpaperType) {
+    var s = Object.assign({}, outputSettings || {})
+    if (wallpaperType === "video" && s.videoFps !== undefined) s.fps = s.videoFps
+    delete s.videoFps
+    return s
+}
+
+// output settings (resolved for the wallpaper type) with the scene's overrides applied on top
+function mergeSceneOverrides(outputSettings, overrides, wallpaperType) {
+    return Object.assign(outputSettingsForType(outputSettings, wallpaperType), sanitizeSceneOverrides(overrides))
 }
 
 function formatSceneOverrideValue(d, value) {

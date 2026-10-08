@@ -45,6 +45,7 @@ PluginComponent {
     property var processStartTimes: ({})
     property var crashCounts: ({})
     property var screenshotTimers: ({})
+    property var wallpaperTypes: ({})
     property bool ready: false
     property bool haveMagick: false
     property bool paused: false
@@ -118,6 +119,7 @@ PluginComponent {
 
     // Same reasoning: backgroundsDir changes how scene ids resolve to --bg, so relaunch everything.
     onBackgroundsDirChanged: {
+        wallpaperTypes = ({})
         if (!ready) return
         stopAllOutputs()
         syncScenesWithData()
@@ -128,12 +130,37 @@ PluginComponent {
         return allSettings[sceneId] || {}
     }
 
-    // the owner's settings with the scene's own overrides (FPS, scaling, audio, ...) on top
+    // the owner's settings for this kind of wallpaper (video FPS vs scene FPS) with the scene's
+    // own overrides (FPS, scaling, audio, ...) on top
     function getOutputSettings(owner, sceneId) {
         const scene = getSceneSettings(sceneId) || {}
-        const merged = Utils.mergeSceneOverrides(outputSettings[owner], scene.overrides)
+        const merged = Utils.mergeSceneOverrides(outputSettings[owner], scene.overrides, wallpaperType(sceneId))
         merged.properties = scene.properties || {}
         return merged
+    }
+
+    // "scene", "video" or "web" from the wallpaper's project.json, "" if it can't be read.
+    // Read synchronously (it's needed to build the command) and cached; misses aren't cached
+    // so a scene that's still downloading gets its type on the next sync.
+    function wallpaperType(sceneId) {
+        if (!sceneId) return ""
+        if (wallpaperTypes[sceneId]) return wallpaperTypes[sceneId]
+        for (const path of Utils.projectJsonCandidates(sceneId, backgroundsDir, steamPaths)) {
+            projectReader.path = path
+            const type = Utils.wallpaperTypeFromProject(projectReader.text())
+            if (type) {
+                wallpaperTypes[sceneId] = type
+                return type
+            }
+        }
+        return ""
+    }
+
+    FileView {
+        id: projectReader
+        blockLoading: true
+        blockAllReads: true
+        printErrors: false
     }
 
     function connectedMonitors() {

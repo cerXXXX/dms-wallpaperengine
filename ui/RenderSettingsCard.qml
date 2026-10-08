@@ -125,7 +125,7 @@ Column {
             spacing: Theme.spacingM
 
             StyledText {
-                text: "FPS"
+                text: "Scene FPS"
                 font.pixelSize: Theme.fontSizeSmall
                 width: 180
                 anchors.verticalCenter: parent.verticalCenter
@@ -159,7 +159,69 @@ Column {
             }
         }
         StyledText {
-            text: "Frame rate for the animated wallpaper"
+            text: "Frame rate for scene and web wallpapers"
+            font.pixelSize: Theme.fontSizeSmall * 0.9
+            opacity: 0.5
+            width: parent.width
+            wrapMode: Text.Wrap
+        }
+    }
+
+    Timer {
+        id: videoFpsDebounceTimer
+        interval: 500
+        repeat: false
+        onTriggered: {
+            saveOutputSetting("videoFps", Math.round(videoFpsSlider.value))
+        }
+    }
+
+    Column {
+        width: parent.width
+        spacing: 2
+
+        Row {
+            width: parent.width
+            height: 24
+            spacing: Theme.spacingM
+
+            StyledText {
+                text: "Video FPS"
+                font.pixelSize: Theme.fontSizeSmall
+                width: 180
+                anchors.verticalCenter: parent.verticalCenter
+            }
+
+            DankSlider {
+                id: videoFpsSlider
+                width: parent.width - 180 - Theme.spacingM - videoFpsValueText.width - Theme.spacingM
+                minimum: 10
+                maximum: 144
+                showValue: false
+                anchors.verticalCenter: parent.verticalCenter
+
+                // follows Scene FPS until it's set on its own
+                Binding {
+                    target: videoFpsSlider
+                    property: "value"
+                    value: getOutputSetting("videoFps", getOutputSetting("fps", 30))
+                }
+
+                onSliderValueChanged: (newValue) => {
+                    videoFpsDebounceTimer.restart()
+                }
+            }
+
+            StyledText {
+                id: videoFpsValueText
+                text: Math.round(videoFpsSlider.value)
+                font.pixelSize: Theme.fontSizeSmall
+                width: 40
+                anchors.verticalCenter: parent.verticalCenter
+            }
+        }
+        StyledText {
+            text: "Frame rate cap for video wallpapers (follows Scene FPS until changed). The patched engine never renders a video faster than its own frame rate, so a high cap costs nothing on a 24 fps video"
             font.pixelSize: Theme.fontSizeSmall * 0.9
             opacity: 0.5
             width: parent.width

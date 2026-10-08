@@ -1269,6 +1269,34 @@ PluginSettings {
         return s[key] !== undefined ? s[key] : defaultValue
     }
 
+    // the active owner's setting as this scene inherits it (a video gets Video FPS as its fps)
+    function getInheritedSceneSetting(sceneId, key, defaultValue) {
+        settingsVersion
+        settingsOwner
+        var all = loadValue("outputSettings", {})
+        var s = Utils.outputSettingsForType(all[settingsOwner], wallpaperTypeOf(sceneId))
+        return s[key] !== undefined ? s[key] : defaultValue
+    }
+
+    property var wallpaperTypes: ({})
+    onResolvedBackgroundsDirChanged: wallpaperTypes = ({})
+
+    // "scene", "video" or "web" from the scene's project.json ("" if unreadable); cached
+    function wallpaperTypeOf(sceneId) {
+        if (!sceneId) return ""
+        if (wallpaperTypes[sceneId]) return wallpaperTypes[sceneId]
+        var candidates = Utils.projectJsonCandidates(sceneId, resolvedBackgroundsDir, steamPaths)
+        for (var i = 0; i < candidates.length; i++) {
+            projectReader.path = candidates[i]
+            var type = Utils.wallpaperTypeFromProject(projectReader.text())
+            if (type) {
+                wallpaperTypes[sceneId] = type
+                return type
+            }
+        }
+        return ""
+    }
+
     function saveOutputSetting(key, value) {
         var owner = settingsOwner
         if (!owner || owner === "span:") return
@@ -1328,6 +1356,13 @@ PluginSettings {
         width: 0
         height: 0
         visible: false
+
+        FileView {
+            id: projectReader
+            blockLoading: true
+            blockAllReads: true
+            printErrors: false
+        }
 
         WallpaperPickerModal {
             id: scenePicker

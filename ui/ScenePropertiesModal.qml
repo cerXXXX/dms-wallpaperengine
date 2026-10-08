@@ -86,7 +86,10 @@ DankModal {
                     }
 
                     StyledText {
-                        text: "Scene ID: " + sceneId
+                        text: {
+                            var type = pluginSettings ? pluginSettings.wallpaperTypeOf(sceneId) : ""
+                            return "Scene ID: " + sceneId + (type ? " · " + type : "")
+                        }
                         font.pixelSize: Theme.fontSizeSmall
                         opacity: 0.7
                     }
@@ -633,7 +636,8 @@ DankModal {
     function inheritedValue(key) {
         var d = Utils.sceneOverrideDef(key)
         var fallback = d ? d.def : undefined
-        return pluginSettings ? pluginSettings.getOutputSetting(key, fallback) : fallback
+        // a video inherits the monitor's Video FPS, scenes its Scene FPS
+        return pluginSettings ? pluginSettings.getInheritedSceneSetting(sceneId, key, fallback) : fallback
     }
 
     function effectiveValue(key) {
