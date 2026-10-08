@@ -1,6 +1,7 @@
 import QtQuick
 import qs.Common
 import qs.Widgets
+import "../js/SceneOverrides.js" as SceneOverrides
 
 Column {
     id: root
@@ -8,6 +9,8 @@ Column {
     property var getOutputSetting
     property var saveOutputSetting
     property string settingsSceneId: ""
+    property var sceneOverrides: ({})
+    readonly property string overridesSummary: SceneOverrides.summary(sceneOverrides)
 
     signal configurePropertiesRequested()
 
@@ -18,6 +21,46 @@ Column {
         text: "Wallpaper Settings"
         font.pixelSize: Theme.fontSizeMedium
         font.weight: Font.Medium
+    }
+
+    // the settings below are the monitor's; say so when the current scene overrides some of them
+    Rectangle {
+        width: parent.width
+        visible: root.overridesSummary !== ""
+        height: visible ? Math.max(overridesText.implicitHeight, editOverridesButton.height) + Theme.spacingS * 2 : 0
+        radius: Theme.cornerRadius
+        color: Theme.surfaceContainerHigh
+
+        DankIcon {
+            id: overridesIcon
+            name: "tune"
+            size: Theme.iconSizeSmall
+            color: Theme.primary
+            anchors.left: parent.left
+            anchors.leftMargin: Theme.spacingM
+            anchors.verticalCenter: parent.verticalCenter
+        }
+
+        StyledText {
+            id: overridesText
+            anchors.left: overridesIcon.right
+            anchors.leftMargin: Theme.spacingS
+            anchors.right: editOverridesButton.left
+            anchors.rightMargin: Theme.spacingS
+            anchors.verticalCenter: parent.verticalCenter
+            text: "This scene overrides: " + root.overridesSummary
+            font.pixelSize: Theme.fontSizeSmall
+            wrapMode: Text.Wrap
+        }
+
+        DankButton {
+            id: editOverridesButton
+            text: "Edit"
+            anchors.right: parent.right
+            anchors.rightMargin: Theme.spacingS
+            anchors.verticalCenter: parent.verticalCenter
+            onClicked: root.configurePropertiesRequested()
+        }
     }
 
     Column {

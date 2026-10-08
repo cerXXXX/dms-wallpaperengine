@@ -12,6 +12,11 @@ A [DankMaterialShell](https://github.com/AvengeMedia/DankMaterialShell) plugin f
 >   screen at the screen's resolution, e.g. a 3840x2160 scene on a 1920x1080 screen renders at 1920x1080. It passes
 >   `--downscale-to-output`, which only the patched linux-wallpaperengine has; with a stock engine leave it off, or the
 >   engine refuses to start.
+> - **Per-scene render settings** (a scene's **Properties** → *Render Settings for This Scene*): FPS, scaling,
+>   silent/volume and every advanced toggle can be overridden for one scene, e.g. 15 FPS for a heavy scene while the
+>   monitor stays at 30. Untouched settings are inherited from the monitor; the reset button next to a setting inherits
+>   it again. The overrides follow the scene through playlists and span groups, and the monitor's settings page shows
+>   which ones the current scene overrides.
 > - Pending screenshot timers are cancelled when a scene is replaced, so switching scenes quickly with "Generate
 >   static wallpaper" on no longer leaves the DMS wallpaper, theme colors and lock screen on the previous scene.
 >
@@ -69,7 +74,7 @@ The unified picker provides a searchable scene grid, named playlists, span group
 Crash recovery: if a wallpaper process dies unexpectedly it is restarted after 2s, but after three consecutive crashes (each under 30s uptime) the plugin gives up on that output and logs an error instead of respawning forever.
 
 ### Settings are per-output
-Each monitor, `*`, and span group keeps its own scaling, FPS, volume, silent, screenshot delay, and advanced toggles — a 1440p monitor and a spanned pair showing the same scene can have different scaling or FPS. The one exception is **Configure Scene Properties** (`--set-property`), which stays per-scene since those values are intrinsic to the wallpaper's content.
+Each monitor, `*`, and span group keeps its own scaling, FPS, volume, silent, screenshot delay, and advanced toggles — a 1440p monitor and a spanned pair showing the same scene can have different scaling or FPS. The one exception is **Configure Scene Properties** (`--set-property`), which stays per-scene since those values are intrinsic to the wallpaper's content. A scene can also override any of the per-output settings for itself (see *Per-scene render settings* above); its overrides win over the output's values.
 
 **Playlist interval can be set to 0** for manual/IPC-only scene swapping (the rotation only advances when you call `dms ipc call linuxWallpaperEngine next|prev|random`).
 

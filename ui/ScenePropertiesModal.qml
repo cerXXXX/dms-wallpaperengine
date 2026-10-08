@@ -7,6 +7,7 @@ import qs.Widgets
 import qs.Modals.Common
 import "../js/PropertiesParser.js" as PropertiesParser
 import "../js/Utils.js" as Utils
+import "../js/SceneOverrides.js" as SceneOverrides
 
 DankModal {
     id: root
@@ -15,12 +16,14 @@ DankModal {
     property string backgroundsDir: ""
     property var properties: []
     property var currentValues: ({})
+    // pending per-scene render overrides (fps, scaling, audio, ...), saved on Apply
+    property var overrideValues: ({})
     property var pluginSettings: null
 
     signal propertiesSaved(var properties)
 
     modalWidth: Math.min(screenWidth - 100, 700)
-    modalHeight: Math.min(screenHeight - 100, 600)
+    modalHeight: Math.min(screenHeight - 100, 760)
     width: modalWidth
     height: modalHeight
     positioning: "center"
@@ -30,6 +33,7 @@ DankModal {
         if (sceneId) {
             properties = []
             currentValues = {}
+            loadOverrides()
             loadProperties()
         }
     }
@@ -38,6 +42,7 @@ DankModal {
         Qt.callLater(() => {
             properties = []
             currentValues = {}
+            overrideValues = {}
         })
     }
 
@@ -45,6 +50,7 @@ DankModal {
         if (sceneId && shouldBeVisible) {
             properties = []
             currentValues = {}
+            loadOverrides()
             loadProperties()
         }
     }
@@ -75,7 +81,7 @@ DankModal {
                     spacing: 4
 
                     StyledText {
-                        text: "Scene Properties"
+                        text: "Scene Settings"
                         font.pixelSize: Theme.fontSizeLarge
                         font.weight: Font.Bold
                     }
@@ -120,6 +126,112 @@ DankModal {
                     id: propertiesColumn
                     width: parent.width
                     spacing: Theme.spacingL
+
+                    Column {
+                        width: parent.width
+                        spacing: Theme.spacingS
+
+                        StyledText {
+                            text: "Render Settings for This Scene"
+                            font.pixelSize: Theme.fontSizeMedium
+                            font.weight: Font.Bold
+                        }
+
+                        StyledText {
+                            text: "Changing a setting here overrides the monitor's value for this scene only. Use the reset button to inherit it again."
+                            font.pixelSize: Theme.fontSizeSmall
+                            opacity: 0.7
+                            width: parent.width
+                            wrapMode: Text.Wrap
+                        }
+
+                        Rectangle {
+                            width: parent.width
+                            height: overridesList.implicitHeight + Theme.spacingM * 2
+                            color: Theme.surface
+                            radius: Theme.cornerRadius
+                            border.width: 1
+                            border.color: Theme.outline
+
+                            Column {
+                                id: overridesList
+                                anchors.fill: parent
+                                anchors.margins: Theme.spacingM
+                                spacing: Theme.spacingS
+
+                                Repeater {
+                                    model: SceneOverrides.DEFS
+
+                                    delegate: Row {
+                                        id: overrideRow
+
+                                        property var def: modelData
+                                        property bool overridden: overrideValues[def.key] !== undefined
+                                        property var value: effectiveValue(def.key)
+
+                                        width: overridesList.width
+                                        height: 48
+                                        spacing: Theme.spacingM
+                                        // volume only matters when the scene plays audio
+                                        visible: def.key !== "volume" || effectiveValue("silent") === false
+
+                                        StyledText {
+                                            width: 170
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            text: overrideRow.def.label
+                                            font.pixelSize: Theme.fontSizeSmall
+                                            font.weight: overrideRow.overridden ? Font.Bold : Font.Normal
+                                            color: overrideRow.overridden ? Theme.primary : Theme.surfaceText
+                                        }
+
+                                        Loader {
+                                            id: overrideControl
+                                            width: parent.width - 170 - overrideState.width - Theme.spacingM * 2
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            // distinct names: DankSlider and Binding have their own "value"
+                                            property var ovrDef: overrideRow.def
+                                            property var ovrValue: overrideRow.value
+                                            sourceComponent: {
+                                                if (ovrDef.type === "slider") return overrideSliderComponent
+                                                if (ovrDef.type === "combo") return overrideComboComponent
+                                                return overrideBoolComponent
+                                            }
+                                        }
+
+                                        Item {
+                                            id: overrideState
+                                            width: 110
+                                            height: parent.height
+
+                                            StyledText {
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                anchors.left: parent.left
+                                                visible: !overrideRow.overridden
+                                                text: "monitor"
+                                                font.pixelSize: Theme.fontSizeSmall
+                                                opacity: 0.5
+                                            }
+
+                                            DankActionButton {
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                anchors.left: parent.left
+                                                visible: overrideRow.overridden
+                                                iconName: "restart_alt"
+                                                tooltipText: "Inherit the monitor's value"
+                                                onClicked: clearOverride(overrideRow.def.key)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    StyledText {
+                        text: "Scene Properties"
+                        font.pixelSize: Theme.fontSizeMedium
+                        font.weight: Font.Bold
+                    }
 
                     StyledText {
                         text: {
@@ -228,7 +340,7 @@ DankModal {
 
                 DankButton {
                     text: "Reset to Defaults"
-                    enabled: properties.length > 0
+                    enabled: properties.length > 0 || Object.keys(overrideValues).length > 0
                     onClicked: resetToDefaults()
                 }
 
@@ -239,7 +351,7 @@ DankModal {
 
                 DankButton {
                     text: "Apply"
-                    enabled: properties.length > 0
+                    enabled: sceneId !== ""
                     onClicked: {
                         saveProperties()
                         propertiesSaved(currentValues)
@@ -441,10 +553,108 @@ DankModal {
         }
     }
 
+    // override controls: they show the effective value (override or inherited); any user change
+    // stores an override. Binding (not a plain binding) because DankSlider assigns its own value
+    // while dragging, which would break a plain one and stop it following a reset.
+    Component {
+        id: overrideSliderComponent
+
+        Row {
+            spacing: Theme.spacingM
+
+            DankSlider {
+                id: overrideSlider
+                width: parent.width - overrideSliderValue.width - Theme.spacingM
+                anchors.verticalCenter: parent.verticalCenter
+                minimum: ovrDef.min
+                maximum: ovrDef.max
+                showValue: false
+                // the list scrolls; don't let the wheel create overrides by accident
+                wheelEnabled: false
+
+                Binding {
+                    target: overrideSlider
+                    property: "value"
+                    value: Math.round(ovrValue)
+                }
+
+                onSliderValueChanged: (newValue) => setOverride(ovrDef.key, newValue)
+            }
+
+            StyledText {
+                id: overrideSliderValue
+                width: 40
+                anchors.verticalCenter: parent.verticalCenter
+                text: Math.round(overrideSlider.value)
+                font.pixelSize: Theme.fontSizeSmall
+            }
+        }
+    }
+
+    Component {
+        id: overrideComboComponent
+
+        DankDropdown {
+            id: overrideCombo
+            options: ovrDef.options
+            compactMode: true
+
+            Binding {
+                target: overrideCombo
+                property: "currentValue"
+                value: String(ovrValue)
+            }
+
+            onValueChanged: (newValue) => setOverride(ovrDef.key, newValue)
+        }
+    }
+
+    Component {
+        id: overrideBoolComponent
+
+        Item {
+            height: overrideToggle.height
+
+            DankToggle {
+                id: overrideToggle
+                anchors.left: parent.left
+                checked: ovrValue === true
+                onToggled: (checked) => setOverride(ovrDef.key, checked)
+            }
+        }
+    }
+
     Component.onCompleted: {
         if (sceneId) {
+            loadOverrides()
             loadProperties()
         }
+    }
+
+    function inheritedValue(key) {
+        var d = SceneOverrides.def(key)
+        var fallback = d ? d.def : undefined
+        return pluginSettings ? pluginSettings.getOutputSetting(key, fallback) : fallback
+    }
+
+    function effectiveValue(key) {
+        return overrideValues[key] !== undefined ? overrideValues[key] : inheritedValue(key)
+    }
+
+    function setOverride(key, value) {
+        var updated = Object.assign({}, overrideValues)
+        updated[key] = value
+        overrideValues = updated
+    }
+
+    function clearOverride(key) {
+        var updated = Object.assign({}, overrideValues)
+        delete updated[key]
+        overrideValues = updated
+    }
+
+    function loadOverrides() {
+        overrideValues = pluginSettings ? pluginSettings.getSceneOverrides(sceneId) : {}
     }
 
     // reassign (not mutate) so the change signal fires and bindings refresh
@@ -488,7 +698,8 @@ DankModal {
 
     function saveProperties() {
         if (pluginSettings) {
-            pluginSettings.saveSceneProperties(sceneId, currentValues)
+            // properties that failed to (or didn't yet) load must not wipe the saved ones
+            pluginSettings.saveSceneSettings(sceneId, properties.length > 0 ? currentValues : undefined, overrideValues)
         }
     }
 
@@ -500,5 +711,6 @@ DankModal {
             }
         }
         currentValues = defaults
+        overrideValues = {}
     }
 }

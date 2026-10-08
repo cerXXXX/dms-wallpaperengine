@@ -9,6 +9,7 @@ import qs.Modules.Plugins
 import "ui"
 import "js/Utils.js" as Utils
 import "js/CommandBuilder.js" as CommandBuilder
+import "js/SceneOverrides.js" as SceneOverrides
 
 PluginComponent {
     id: root
@@ -128,9 +129,11 @@ PluginComponent {
         return allSettings[sceneId] || {}
     }
 
+    // the owner's settings with the scene's own overrides (FPS, scaling, audio, ...) on top
     function getOutputSettings(owner, sceneId) {
-        const merged = Object.assign({}, outputSettings[owner] || {})
-        merged.properties = (getSceneSettings(sceneId) || {}).properties || {}
+        const scene = getSceneSettings(sceneId) || {}
+        const merged = SceneOverrides.merge(outputSettings[owner], scene.overrides)
+        merged.properties = scene.properties || {}
         return merged
     }
 

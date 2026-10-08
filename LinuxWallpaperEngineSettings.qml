@@ -8,6 +8,7 @@ import qs.Services
 import qs.Modules.Plugins
 import "ui"
 import "js/Utils.js" as Utils
+import "js/SceneOverrides.js" as SceneOverrides
 
 PluginSettings {
     id: root
@@ -614,6 +615,7 @@ PluginSettings {
             getOutputSetting: root.getOutputSetting
             saveOutputSetting: root.saveOutputSetting
             settingsSceneId: root.settingsSceneId
+            sceneOverrides: root.getSceneOverrides(root.settingsSceneId)
             onConfigurePropertiesRequested: root.openSceneProperties(root.settingsSceneId)
         }
     }
@@ -1296,10 +1298,28 @@ PluginSettings {
     }
 
     function saveSceneProperties(sceneId, props) {
+        saveSceneSettings(sceneId, props, undefined)
+    }
+
+    function getSceneOverrides(sceneId) {
+        settingsVersion
+        if (!sceneId) return {}
+        var s = loadValue("sceneSettings", {})[sceneId] || {}
+        return SceneOverrides.sanitize(s.overrides)
+    }
+
+    // one save for both, so the daemon relaunches the scene once; undefined leaves that part as is
+    function saveSceneSettings(sceneId, props, overrides) {
         if (!sceneId) return
-        var allSettings = loadValue("sceneSettings", {})
-        if (!allSettings[sceneId]) allSettings[sceneId] = {}
-        allSettings[sceneId].properties = props
+        var allSettings = Object.assign({}, loadValue("sceneSettings", {}))
+        var s = Object.assign({}, allSettings[sceneId] || {})
+        if (props !== undefined) s.properties = props
+        if (overrides !== undefined) {
+            var clean = SceneOverrides.sanitize(overrides)
+            if (Object.keys(clean).length > 0) s.overrides = clean
+            else delete s.overrides
+        }
+        allSettings[sceneId] = s
         saveValue("sceneSettings", allSettings)
     }
 
