@@ -8,7 +8,6 @@ import qs.Services
 import qs.Modules.Plugins
 import "ui"
 import "js/Utils.js" as Utils
-import "js/SceneOverrides.js" as SceneOverrides
 
 PluginSettings {
     id: root
@@ -1305,7 +1304,7 @@ PluginSettings {
         settingsVersion
         if (!sceneId) return {}
         var s = loadValue("sceneSettings", {})[sceneId] || {}
-        return SceneOverrides.sanitize(s.overrides)
+        return Utils.sanitizeSceneOverrides(s.overrides)
     }
 
     // one save for both, so the daemon relaunches the scene once; undefined leaves that part as is
@@ -1315,7 +1314,7 @@ PluginSettings {
         var s = Object.assign({}, allSettings[sceneId] || {})
         if (props !== undefined) s.properties = props
         if (overrides !== undefined) {
-            var clean = SceneOverrides.sanitize(overrides)
+            var clean = Utils.sanitizeSceneOverrides(overrides)
             if (Object.keys(clean).length > 0) s.overrides = clean
             else delete s.overrides
         }

@@ -7,7 +7,6 @@ import qs.Widgets
 import qs.Modals.Common
 import "../js/PropertiesParser.js" as PropertiesParser
 import "../js/Utils.js" as Utils
-import "../js/SceneOverrides.js" as SceneOverrides
 
 DankModal {
     id: root
@@ -160,7 +159,7 @@ DankModal {
                                 spacing: Theme.spacingS
 
                                 Repeater {
-                                    model: SceneOverrides.DEFS
+                                    model: Utils.SCENE_OVERRIDE_DEFS
 
                                     delegate: Row {
                                         id: overrideRow
@@ -632,7 +631,7 @@ DankModal {
     }
 
     function inheritedValue(key) {
-        var d = SceneOverrides.def(key)
+        var d = Utils.sceneOverrideDef(key)
         var fallback = d ? d.def : undefined
         return pluginSettings ? pluginSettings.getOutputSetting(key, fallback) : fallback
     }

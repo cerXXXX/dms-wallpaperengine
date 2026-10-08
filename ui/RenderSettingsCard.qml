@@ -1,7 +1,7 @@
 import QtQuick
 import qs.Common
 import qs.Widgets
-import "../js/SceneOverrides.js" as SceneOverrides
+import "../js/Utils.js" as Utils
 
 Column {
     id: root
@@ -10,7 +10,7 @@ Column {
     property var saveOutputSetting
     property string settingsSceneId: ""
     property var sceneOverrides: ({})
-    readonly property string overridesSummary: SceneOverrides.summary(sceneOverrides)
+    readonly property string overridesSummary: Utils.sceneOverridesSummary(sceneOverrides)
 
     signal configurePropertiesRequested()
 
