@@ -4,6 +4,23 @@ A [DankMaterialShell](https://github.com/AvengeMedia/DankMaterialShell) plugin f
 
 ![dms-wallpaperengine Screenshot](screenshot.png)
 
+> **This is a personal fork** of [sgtaziz/dms-wallpaperengine](https://github.com/sgtaziz/dms-wallpaperengine), used
+> together with the patched engine from [wallpaper-engine-niri](https://github.com/cerXXXX/wallpaper-engine-niri).
+> Changes on top of upstream:
+>
+> - **Downscale to Screen** (Advanced Settings → Performance & Rendering): renders scenes and videos bigger than the
+>   screen at the screen's resolution, e.g. a 3840x2160 scene on a 1920x1080 screen renders at 1920x1080. It passes
+>   `--downscale-to-output`, which only the patched linux-wallpaperengine has; with a stock engine leave it off, or the
+>   engine refuses to start.
+> - Pending screenshot timers are cancelled when a scene is replaced, so switching scenes quickly with "Generate
+>   static wallpaper" on no longer leaves the DMS wallpaper, theme colors and lock screen on the previous scene.
+>
+> Install it as a git checkout so `git pull` updates it:
+> ```bash
+> git clone -b downscale-to-output https://github.com/cerXXXX/dms-wallpaperengine \
+>     ~/.config/DankMaterialShell/plugins/linuxWallpaperEngine
+> ```
+
 ## Installation
 
 ### Pre-requisites
