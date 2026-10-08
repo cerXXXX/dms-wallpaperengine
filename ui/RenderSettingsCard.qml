@@ -311,6 +311,11 @@ Column {
                     settingKey: "disableParticles"
                 },
                 {
+                    label: "Downscale to Screen",
+                    description: "Renders scenes and videos bigger than the screen at the screen's resolution instead of their own (e.g. a 4K scene on a 1080p screen). Needs a linux-wallpaperengine build with --downscale-to-output",
+                    settingKey: "downscaleToOutput"
+                },
+                {
                     label: "Disable Parallax",
                     description: "Disables parallax effect for the backgrounds",
                     settingKey: "disableParallax"

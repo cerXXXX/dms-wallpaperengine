@@ -70,6 +70,7 @@ function buildCommandArgs(o) {
     }
 
     if (o.settings.disableParticles) args.push("--disable-particles")
+    if (o.settings.downscaleToOutput) args.push("--downscale-to-output")
     if (o.settings.disableMouse) args.push("--disable-mouse")
     if (o.settings.disableParallax) args.push("--disable-parallax")
     if (o.settings.noAutoMute) args.push("--noautomute")
