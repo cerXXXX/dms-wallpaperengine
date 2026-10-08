@@ -110,6 +110,11 @@ Column {
         interval: 500
         repeat: false
         onTriggered: {
+            // an unset Video FPS falls back to Scene FPS; pin it first so moving
+            // Scene FPS doesn't drag the videos' frame rate along
+            if (getOutputSetting("videoFps", undefined) === undefined) {
+                saveOutputSetting("videoFps", getOutputSetting("fps", 30))
+            }
             saveOutputSetting("fps", Math.round(fpsSlider.value))
         }
     }
@@ -200,7 +205,7 @@ Column {
                 showValue: false
                 anchors.verticalCenter: parent.verticalCenter
 
-                // follows Scene FPS until it's set on its own
+                // unset only on configs from before Video FPS existed: show what videos get (Scene FPS)
                 Binding {
                     target: videoFpsSlider
                     property: "value"
@@ -221,7 +226,7 @@ Column {
             }
         }
         StyledText {
-            text: "Frame rate cap for video wallpapers (follows Scene FPS until changed). The patched engine never renders a video faster than its own frame rate, so a high cap costs nothing on a 24 fps video"
+            text: "Frame rate cap for video wallpapers, independent of Scene FPS. The patched engine never renders a video faster than its own frame rate, so a high cap costs nothing on a 24 fps video"
             font.pixelSize: Theme.fontSizeSmall * 0.9
             opacity: 0.5
             width: parent.width

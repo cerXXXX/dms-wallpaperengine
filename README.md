@@ -18,7 +18,7 @@ A [DankMaterialShell](https://github.com/AvengeMedia/DankMaterialShell) plugin f
 >   it again. The overrides follow the scene through playlists and span groups, and the monitor's settings page shows
 >   which ones the current scene overrides.
 > - **Separate Scene FPS and Video FPS** per monitor: video wallpapers (`"type": "video"` in `project.json`) use
->   Video FPS, scenes and web wallpapers use Scene FPS. Video FPS follows Scene FPS until it's changed. A scene's own
+>   Video FPS, scenes and web wallpapers use Scene FPS. The two are independent (an older config without Video FPS keeps its videos at the old FPS). A scene's own
 >   FPS override wins over both.
 > - Pending screenshot timers are cancelled when a scene is replaced, so switching scenes quickly with "Generate
 >   static wallpaper" on no longer leaves the DMS wallpaper, theme colors and lock screen on the previous scene.
