@@ -17,7 +17,7 @@ A [DankMaterialShell](https://github.com/AvengeMedia/DankMaterialShell) plugin f
 >
 > Install it as a git checkout so `git pull` updates it:
 > ```bash
-> git clone -b downscale-to-output https://github.com/cerXXXX/dms-wallpaperengine \
+> git clone https://github.com/cerXXXX/dms-wallpaperengine \
 >     ~/.config/DankMaterialShell/plugins/linuxWallpaperEngine
 > ```
 
