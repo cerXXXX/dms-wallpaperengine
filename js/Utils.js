@@ -378,11 +378,24 @@ function projectJsonCandidates(sceneId, backgroundsDir, steamPaths) {
 
 // Wallpaper type from a project.json's text ("scene", "video", "web"), "" when unreadable
 function wallpaperTypeFromProject(text) {
+    return projectInfoFromText(text, "").type
+}
+
+// { type, file } from a project.json's text; file is the absolute path of a video wallpaper's
+// video ("" for other types or when unreadable)
+function projectInfoFromText(text, projectJsonPath) {
+    var p
     try {
-        return String(JSON.parse(text).type || "").toLowerCase()
+        p = JSON.parse(text)
     } catch (e) {
-        return ""
+        return { type: "", file: "" }
     }
+    var type = String((p && p.type) || "").toLowerCase()
+    var file = ""
+    if (type === "video" && p.file && projectJsonPath) {
+        file = projectJsonPath.substring(0, projectJsonPath.lastIndexOf("/") + 1) + p.file
+    }
+    return { type: type, file: file }
 }
 
 // The output's FPS for this kind of wallpaper: videos use videoFps (the plain fps until it is set),

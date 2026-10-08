@@ -45,7 +45,7 @@ PluginComponent {
     property var processStartTimes: ({})
     property var crashCounts: ({})
     property var screenshotTimers: ({})
-    property var wallpaperTypes: ({})
+    property var projectInfos: ({})
     property bool ready: false
     property bool haveMagick: false
     property bool paused: false
@@ -119,7 +119,7 @@ PluginComponent {
 
     // Same reasoning: backgroundsDir changes how scene ids resolve to --bg, so relaunch everything.
     onBackgroundsDirChanged: {
-        wallpaperTypes = ({})
+        projectInfos = ({})
         if (!ready) return
         stopAllOutputs()
         syncScenesWithData()
@@ -143,17 +143,38 @@ PluginComponent {
     // Read synchronously (it's needed to build the command) and cached; misses aren't cached
     // so a scene that's still downloading gets its type on the next sync.
     function wallpaperType(sceneId) {
-        if (!sceneId) return ""
-        if (wallpaperTypes[sceneId]) return wallpaperTypes[sceneId]
+        return projectInfo(sceneId).type
+    }
+
+    // { type, file } of the wallpaper (file: a video wallpaper's video), see wallpaperType
+    function projectInfo(sceneId) {
+        if (!sceneId) return { type: "", file: "" }
+        if (projectInfos[sceneId]) return projectInfos[sceneId]
         for (const path of Utils.projectJsonCandidates(sceneId, backgroundsDir, steamPaths)) {
             projectReader.path = path
-            const type = Utils.wallpaperTypeFromProject(projectReader.text())
-            if (type) {
-                wallpaperTypes[sceneId] = type
-                return type
+            const info = Utils.projectInfoFromText(projectReader.text(), path)
+            if (info.type) {
+                projectInfos[sceneId] = info
+                return info
             }
         }
-        return ""
+        return { type: "", file: "" }
+    }
+
+    // The lock screen can't show the engine (the compositor hides every other surface while
+    // locked), so tell the patched DMS lock screen (wallpaper-engine-niri/dms-lock-screen) which
+    // video each monitor shows: it plays that video instead of the static screenshot.
+    function publishLockVideos() {
+        const videos = {}
+        if (ready && !shouldPauseWallpaper) {
+            for (const o of computeOutputs()) {
+                const info = projectInfo(ownerCurrentScene(o.owner))
+                if (!info.file) continue
+                for (const m of o.monitors) videos[m] = info.file
+            }
+        }
+        const current = PluginService.getGlobalVar(pluginId, "lockVideos", {})
+        if (!Utils.deepEqual(current, videos)) PluginService.setGlobalVar(pluginId, "lockVideos", videos)
     }
 
     FileView {
@@ -636,6 +657,7 @@ PluginComponent {
         }
 
         restartPlaylistTimers()
+        publishLockVideos()
     }
 
     function startOutput(key, output, sceneId, forceNoAudio) {
@@ -844,6 +866,7 @@ PluginComponent {
 
     function pauseOutputs() {
         paused = true
+        publishLockVideos()
         for (const key in rotationTimers) {
             rotationTimers[key].running = false
         }
@@ -946,6 +969,7 @@ PluginComponent {
         if (ready) {
             stopAllOutputs()
             ready = false
+            publishLockVideos()
             console.info("LinuxWallpaperEngine: Toggled OFF")
         } else {
             prevGenerateStaticWallpaper = generateStaticWallpaper
@@ -1020,6 +1044,7 @@ PluginComponent {
         function randomMonitor(monitor: string): string { return root.ipcAdvance(monitor, 0) }
         function set(sceneId: string, monitor: string): string { return root.ipcSet(sceneId, monitor) }
         function list(): string { return root.ipcList() }
+        function lockVideos(): string { return JSON.stringify(PluginService.getGlobalVar(root.pluginId, "lockVideos", {})) }
         function picker(): string { return root.openPicker("") }
         function pickerMonitor(monitor: string): string { return root.openPicker(monitor) }
         function playlistCreate(name: string): string { return root.createNamedPlaylist(name) }
@@ -1302,6 +1327,7 @@ PluginComponent {
 
     Component.onDestruction: {
         console.info("LinuxWallpaperEngine: Plugin stopping, cleaning up processes")
+        PluginService.setGlobalVar(pluginId, "lockVideos", {})
 
         for (const key in processes) {
             if (processes[key]) {
