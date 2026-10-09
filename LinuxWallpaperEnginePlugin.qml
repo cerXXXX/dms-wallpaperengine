@@ -305,7 +305,8 @@ PluginComponent {
                     sceneId: want.sceneId,
                     port: want.port,
                     frameFile: want.frameFile,
-                    command: CommandBuilder.buildCommandArgs({
+                    // below the shell: the lock screen and its password field come first while the scene loads
+                    command: ["nice", "-n", "10"].concat(CommandBuilder.buildCommandArgs({
                         streamTarget: want.frameFile ? "" : "udp://127.0.0.1:" + want.port + "?pkt_size=1316",
                         frameFile: want.frameFile,
                         eco: !!want.frameFile,
@@ -314,7 +315,7 @@ PluginComponent {
                         settings: getOutputSettings(want.owner, want.sceneId),
                         assetsDir: assetsDir,
                         backgroundsDir: backgroundsDir
-                    })
+                    }))
                 })
                 lockStreamProcesses[monitor] = proc
                 proc.running = true
