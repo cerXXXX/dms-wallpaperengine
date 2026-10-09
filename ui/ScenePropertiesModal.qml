@@ -27,6 +27,9 @@ DankModal {
     property bool layersSupported: false
     property var hiddenLayers: []
     property var disabledEffects: []
+    // turning a layer off turns off its copies too (other languages, other layouts)
+    property bool linkLayers: true
+    property var layerLinks: ({ layers: {}, effects: {} })
     // pending per-scene render overrides (fps, scaling, audio, ...), saved on Apply
     property var overrideValues: ({})
     property var pluginSettings: null
@@ -48,8 +51,10 @@ DankModal {
             currentValues = {}
             overrideValues = {}
             layers = []
+            layerLinks = { layers: {}, effects: {} }
             hiddenLayers = []
             disabledEffects = []
+            linkLayers = true
         })
     }
 
@@ -259,6 +264,54 @@ DankModal {
                             opacity: 0.7
                             width: parent.width
                             wrapMode: Text.Wrap
+                        }
+
+                        Rectangle {
+                            width: parent.width
+                            visible: layersSupported && layers.length > 0
+                            height: visible ? linkRow.implicitHeight + Theme.spacingM * 2 : 0
+                            color: Theme.surface
+                            radius: Theme.cornerRadius
+                            border.width: 1
+                            border.color: Theme.outline
+
+                            Item {
+                                id: linkRow
+                                anchors.fill: parent
+                                anchors.margins: Theme.spacingM
+                                implicitHeight: Math.max(linkText.implicitHeight, linkToggle.height)
+
+                                Column {
+                                    id: linkText
+                                    anchors.left: parent.left
+                                    anchors.right: linkToggle.left
+                                    anchors.rightMargin: Theme.spacingM
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    spacing: 2
+
+                                    StyledText {
+                                        text: "Same layers together"
+                                        font.pixelSize: Theme.fontSizeSmall
+                                        font.weight: Font.Medium
+                                    }
+
+                                    StyledText {
+                                        width: parent.width
+                                        text: "Turning a layer or effect off also turns off its copies with the same name, e.g. in the other languages or clock layouts of the scene."
+                                        font.pixelSize: Theme.fontSizeSmall
+                                        opacity: 0.7
+                                        wrapMode: Text.Wrap
+                                    }
+                                }
+
+                                DankToggle {
+                                    id: linkToggle
+                                    anchors.right: parent.right
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    checked: linkLayers
+                                    onToggled: (checked) => linkLayers = checked
+                                }
+                            }
                         }
 
                         Rectangle {
@@ -851,18 +904,17 @@ DankModal {
         var saved = pluginSettings ? pluginSettings.getSceneLayers(sceneId) : {}
         hiddenLayers = saved.hiddenLayers || []
         disabledEffects = saved.disabledEffects || []
+        linkLayers = saved.linkLayers !== false
     }
 
     function setLayerShown(id, shown) {
-        var list = hiddenLayers.filter(function(x) { return x !== id })
-        if (!shown) list.push(id)
-        hiddenLayers = list
+        var ids = linkLayers && layerLinks.layers[id] ? layerLinks.layers[id] : [id]
+        hiddenLayers = SceneProps.setIds(hiddenLayers, ids, !shown)
     }
 
     function setEffectEnabled(id, enabled) {
-        var list = disabledEffects.filter(function(x) { return x !== id })
-        if (!enabled) list.push(id)
-        disabledEffects = list
+        var ids = linkLayers && layerLinks.effects[id] ? layerLinks.effects[id] : [id]
+        disabledEffects = SceneProps.setIds(disabledEffects, ids, !enabled)
     }
 
     function layerHiddenByAncestor(layer) {
@@ -928,7 +980,11 @@ DankModal {
         }
 
         onExited: (code) => {
-            if (code === 0) layers = SceneProps.parseLayers(output)
+            if (code === 0) {
+                var all = SceneProps.parseLayerData(output)
+                layers = SceneProps.visibleLayerTree(all)
+                layerLinks = SceneProps.layerLinks(all)
+            }
             output = ""
             layersLoading = false
             if (rerun) {
@@ -943,7 +999,8 @@ DankModal {
             // properties that failed to (or didn't yet) load must not wipe the saved ones
             pluginSettings.saveSceneSettings(sceneId, allProperties.length > 0 ? currentValues : undefined, overrideValues, {
                 hiddenLayers: hiddenLayers,
-                disabledEffects: disabledEffects
+                disabledEffects: disabledEffects,
+                linkLayers: linkLayers
             })
         }
     }
@@ -953,5 +1010,6 @@ DankModal {
         overrideValues = {}
         hiddenLayers = []
         disabledEffects = []
+        linkLayers = true
     }
 }

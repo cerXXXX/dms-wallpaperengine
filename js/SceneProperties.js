@@ -238,29 +238,31 @@ function layerIcon(type) {
     return "folder"
 }
 
-// The tree of layers the scene shows with the given properties, depth-first in the scene's order:
-// [{ id, name, type, depth, parent, effects: [{ id, name }] }]. Layers and effects the scene itself
-// hides (another language, an effect turned off by a property) are left out.
-function parseLayers(output) {
+// Every layer of the scene as --list-layers prints it: [{ id, name, type, parent, hidden, effects }]
+function parseLayerData(output) {
     var lines = String(output || "").split("\n")
-    var data = null
     for (var i = lines.length - 1; i >= 0; i--) {
         var line = lines[i].trim()
         if (line.charAt(0) !== "{") continue
         try {
-            data = JSON.parse(line)
-            break
+            var data = JSON.parse(line)
+            if (data && Array.isArray(data.layers)) return data.layers
         } catch (e) {
             continue
         }
     }
-    if (!data || !Array.isArray(data.layers)) return []
+    return []
+}
 
+// The tree of layers the scene shows with the given properties, depth-first in the scene's order:
+// [{ id, name, type, depth, parent, effects: [{ id, name }] }]. Layers and effects the scene itself
+// hides (another language, an effect turned off by a property) are left out.
+function visibleLayerTree(allLayers) {
     var byId = {}
     var children = {}
     var roots = []
-    data.layers.forEach(function(l) { byId[l.id] = l })
-    data.layers.forEach(function(l) {
+    allLayers.forEach(function(l) { byId[l.id] = l })
+    allLayers.forEach(function(l) {
         if (l.hidden) return
         if (l.parent !== null && l.parent !== undefined && byId[l.parent]) {
             if (!children[l.parent]) children[l.parent] = []
@@ -287,6 +289,76 @@ function parseLayers(output) {
     }
     roots.forEach(function(l) { visit(l, 0) })
     return result
+}
+
+function parseLayers(output) {
+    return visibleLayerTree(parseLayerData(output))
+}
+
+// Which layers (and effects) are copies of each other, e.g. the stars of every language copy of a
+// multi-language scene. Layers are linked when they have the same type and name; a group whose name
+// differs between copies ("Cat ENG", "Cat RUS") is linked when its children have the same names.
+// Effects are linked when their layers are, by name and position among the layer's effects.
+// Returns { layers: { id: [linked ids] }, effects: { id: [linked ids] } }, each list including the id.
+function layerLinks(allLayers) {
+    var parent = {}
+    function find(k) {
+        while (parent[k] !== k) {
+            parent[k] = parent[parent[k]]
+            k = parent[k]
+        }
+        return k
+    }
+    function union(a, b) {
+        if (parent[a] === undefined) parent[a] = a
+        if (parent[b] === undefined) parent[b] = b
+        parent[find(a)] = find(b)
+    }
+
+    var childNames = {}
+    allLayers.forEach(function(l) {
+        if (l.parent === null || l.parent === undefined) return
+        if (!childNames[l.parent]) childNames[l.parent] = []
+        childNames[l.parent].push(l.type + ":" + l.name)
+    })
+
+    allLayers.forEach(function(l) {
+        var key = "id:" + l.id
+        union(key, key)
+        if (l.name) union(key, "name:" + l.type + ":" + l.name)
+        var kids = childNames[l.id]
+        if (kids && kids.length > 0) union(key, "children:" + l.type + ":" + kids.slice().sort().join("\u0001"))
+    })
+
+    var layerGroups = {}
+    allLayers.forEach(function(l) {
+        var g = find("id:" + l.id)
+        if (!layerGroups[g]) layerGroups[g] = []
+        layerGroups[g].push(l.id)
+    })
+
+    var result = { layers: {}, effects: {} }
+    var effectGroups = {}
+    allLayers.forEach(function(l) {
+        var g = find("id:" + l.id)
+        result.layers[l.id] = layerGroups[g]
+        var seen = {}
+        ;(l.effects || []).forEach(function(e) {
+            seen[e.name] = (seen[e.name] || 0) + 1
+            var ek = g + "|" + e.name + "|" + seen[e.name]
+            if (!effectGroups[ek]) effectGroups[ek] = []
+            effectGroups[ek].push(e.id)
+            result.effects[e.id] = effectGroups[ek]
+        })
+    })
+    return result
+}
+
+// ids with every id in "ids" added (on) or removed (!on)
+function setIds(list, ids, on) {
+    var out = (list || []).filter(function(x) { return ids.indexOf(x) === -1 })
+    if (on) out = out.concat(ids)
+    return out
 }
 
 // ids as the engine flag wants them ("1,2,3"), "" when there are none

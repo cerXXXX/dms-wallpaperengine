@@ -1386,13 +1386,15 @@ PluginSettings {
         return Utils.sanitizeSceneOverrides(s.overrides)
     }
 
-    // { hiddenLayers: [ids], disabledEffects: [ids] } the user turned off in this scene
+    // { hiddenLayers: [ids], disabledEffects: [ids], linkLayers } the user turned off in this scene;
+    // linkLayers (default true): turning a layer off turns off its same-named copies too
     function getSceneLayers(sceneId) {
         if (!sceneId) return {}
         var s = loadValue("sceneSettings", {})[sceneId] || {}
         return {
             hiddenLayers: Array.isArray(s.hiddenLayers) ? s.hiddenLayers : [],
-            disabledEffects: Array.isArray(s.disabledEffects) ? s.disabledEffects : []
+            disabledEffects: Array.isArray(s.disabledEffects) ? s.disabledEffects : [],
+            linkLayers: s.linkLayers !== false
         }
     }
 
@@ -1414,6 +1416,8 @@ PluginSettings {
             else delete s.hiddenLayers
             if (disabled.length > 0) s.disabledEffects = disabled
             else delete s.disabledEffects
+            if (layerChoices.linkLayers === false) s.linkLayers = false
+            else delete s.linkLayers
         }
         allSettings[sceneId] = s
         saveValue("sceneSettings", allSettings)

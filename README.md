@@ -22,8 +22,11 @@ A [DankMaterialShell](https://github.com/AvengeMedia/DankMaterialShell) plugin f
 >   Properties whose `condition` doesn't hold are hidden, so a multi-language scene only shows the chosen language's
 >   options.
 > - **Layers & Effects** (same dialog): every layer the scene shows with the current properties, and each layer's
->   effects, can be turned off. A hidden layer isn't loaded at all. Needs the patched engine (`--list-layers`,
->   `--hide-layer`, `--disable-effect`); with a stock engine the section says so and stays empty.
+>   effects, can be turned off. A hidden layer isn't loaded at all. With *Same layers together* (on by default)
+>   turning a layer or effect off also turns off its same-named copies, e.g. the stars of every language copy of a
+>   multi-language scene; a group whose name differs between copies is matched by its children's names. Needs the
+>   patched engine (`--list-layers`, `--hide-layer`, `--disable-effect`); with a stock engine the section says so and
+>   stays empty.
 > - **Separate Scene FPS and Video FPS** per monitor: video wallpapers (`"type": "video"` in `project.json`) use
 >   Video FPS, scenes and web wallpapers use Scene FPS. The two are independent (an older config without Video FPS keeps its videos at the old FPS). A scene's own
 >   FPS override wins over both.
