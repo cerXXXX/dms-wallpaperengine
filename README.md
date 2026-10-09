@@ -123,8 +123,20 @@ By default linux-wallpaperengine auto-discovers the WallpaperEngine `assets` fol
 ### Custom backgrounds folder
 linux-wallpaperengine resolves a scene by workshop id only from the standard Steam workshop dirs. To use scenes stored elsewhere, set **Backgrounds Folder** under Custom Paths to a directory of scene folders (e.g. `~/backgrounds`). When set, it becomes the authoritative source: Browse lists scenes from it, and every scene id is resolved against it and passed to `--bg` as a path (`<folder>/<id>`), so Steam Workshop discovery is bypassed entirely. Clear the folder to go back to Steam Workshop ids. An invalid folder (or one missing a configured scene) makes that scene fail to load, as expected. Manually-entered ids follow the same resolution; absolute paths are always used as-is.
 
-### Power management
-**Pause on Power Saver** / **Pause on Battery** freeze wallpapers when the system is on power-saver or unplugged, rather than killing them. The running processes are suspended in place (`SIGSTOP`), so the last rendered frame stays on screen like a paused video while using no CPU. When the condition clears, they're resumed (`SIGCONT`) — no relaunch or flicker. Any scene/monitor changes made while paused are applied on resume.
+### Power modes
+The power profile (power-profiles-daemon) picks what wallpapers do; it's the only trigger (battery state no longer counts on its own). Each profile — **Performance**, **Balanced**, **Power Saver** — gets one of three modes (defaults: Full / Eco / Eco):
+
+- **Full**: animated as usual.
+- **Eco: update on change**: the wallpaper is held still. Its animation time stops (particles, shaders, texture animations; videos pause) while clocks and dates keep the real time; every second the engine renders the frame and only shows it when it changed. A clock with seconds updates every second, one without once a minute, a wallpaper without clocks never. The lock screen shows the same held scene, updated the same way.
+- **Eco: low FPS**: the wallpaper keeps moving at the **Low FPS** rate (default 5, never above its own FPS) with particles, mouse and parallax turned off (each can be kept). Videos hold their frame instead, decoding them slowly saves nothing.
+
+**Mute in Eco** (on by default) fades the sound out in both eco modes. Switching between Full and Eco happens on the running engine, without a restart; Low FPS relaunches, since its settings are launch options. Without power-profiles-daemon wallpapers run in Full.
+
+This needs the engine with patch 0009 (`--control`, `--eco`, `--frame-file`); the plugin checks `linux-wallpaperengine --help` once. With an older engine Eco freezes the process with `SIGSTOP` once its first frame is up (no clocks, no sound), and the lock screen keeps its screenshot in eco.
+
+Sound also fades out (instead of cutting) while another app plays and comes back 2 s after it stopped (the engine's automute, see **No Auto Mute**). **No Fullscreen Pause** is on by default: niri itself stops asking for frames of a wallpaper that opaque windows cover and keeps it moving under see-through ones, while the engine's own pause would stop it under any fullscreen window.
+
+**Generate Static Wallpaper** is on by default: the screenshot it sets as the DMS wallpaper is what shows while the engine starts and if it crashes.
 
 ### IPC commands & keyboard shortcuts
 Plugin on/off is built into DMS for every plugin:

@@ -432,8 +432,9 @@ Column {
                 },
                 {
                     label: "No Fullscreen Pause",
-                    description: "Prevents the background pausing when an app is fullscreen",
-                    settingKey: "noFullscreenPause"
+                    description: "On by default: niri itself stops drawing a wallpaper that opaque windows cover and keeps it moving under see-through ones. Off: the engine pauses whenever any window is fullscreen",
+                    settingKey: "noFullscreenPause",
+                    defaultVal: true
                 },
                 {
                     label: "Pause Only Active",
