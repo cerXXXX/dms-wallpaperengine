@@ -626,82 +626,147 @@ PluginSettings {
     }
 
     StyledText {
-        text: "Power Management"
+        text: "Power Modes"
         font.pixelSize: Theme.fontSizeMedium
         font.weight: Font.Medium
     }
 
-    Column {
+    StyledText {
+        text: "What wallpapers do under each power profile. Eco: update on change holds the wallpaper still and only redraws it when a clock, a date or the time of day changes (once a second or once a minute, found out by itself; no clock, no redraws). Eco: low FPS keeps it moving slowly with the parts below turned off. Videos hold their frame in both eco modes. Needs the engine with patch 0009 to switch without a restart; an older engine is frozen in eco instead."
+        font.pixelSize: Theme.fontSizeSmall * 0.9
+        opacity: 0.5
         width: parent.width
-        spacing: 2
+        wrapMode: Text.Wrap
+    }
 
-        Row {
-            width: parent.width
+    Repeater {
+        model: Utils.POWER_PROFILES
+
+        delegate: Row {
+            id: profileRow
+            required property var modelData
+            width: parent ? parent.width : 0
             spacing: Theme.spacingM
+
             StyledText {
-                text: "Pause on Power Saver"
+                text: profileRow.modelData.label
                 font.pixelSize: Theme.fontSizeSmall
                 width: 180
                 anchors.verticalCenter: parent.verticalCenter
             }
-            DankToggle {
-                id: pauseOnPowerSaverToggle
-                anchors.verticalCenter: parent.verticalCenter
+
+            DankDropdown {
+                id: modeDropdown
+                width: parent.width - 180 - Theme.spacingM
+                options: Utils.POWER_MODES.map(m => m.label)
+                compactMode: true
 
                 Binding {
-                    target: pauseOnPowerSaverToggle
-                    property: "checked"
-                    value: loadValue("pauseOnPowerSaver", false)
+                    target: modeDropdown
+                    property: "currentValue"
+                    value: Utils.powerModeLabel(Utils.powerModeFor(loadValue("powerModes", {}), profileRow.modelData.key))
                 }
 
-                onToggled: {
-                    saveValue("pauseOnPowerSaver", checked)
+                onValueChanged: (value) => {
+                    const modes = Object.assign({}, loadValue("powerModes", {}))
+                    modes[profileRow.modelData.key] = Utils.powerModeKey(value)
+                    saveValue("powerModes", modes)
                 }
             }
-        }
-        StyledText {
-            text: "Freeze the wallpaper on its current frame while the power saver profile is active (it still starts and shows its first frame)"
-            font.pixelSize: Theme.fontSizeSmall * 0.9
-            opacity: 0.5
-            width: parent.width
-            wrapMode: Text.Wrap
         }
     }
 
-    Column {
+    Row {
         width: parent.width
-        spacing: 2
+        height: 24
+        spacing: Theme.spacingM
 
-        Row {
-            width: parent.width
-            spacing: Theme.spacingM
-            StyledText {
-                text: "Pause on Battery"
-                font.pixelSize: Theme.fontSizeSmall
-                width: 180
-                anchors.verticalCenter: parent.verticalCenter
+        StyledText {
+            text: "Low FPS"
+            font.pixelSize: Theme.fontSizeSmall
+            width: 180
+            anchors.verticalCenter: parent.verticalCenter
+        }
+
+        DankSlider {
+            id: ecoFpsSlider
+            width: parent.width - 180 - Theme.spacingM - ecoFpsText.width - Theme.spacingM
+            minimum: 1
+            maximum: 15
+            showValue: false
+            anchors.verticalCenter: parent.verticalCenter
+
+            Binding {
+                target: ecoFpsSlider
+                property: "value"
+                value: loadValue("ecoFps", 5)
             }
-            DankToggle {
-                id: pauseOnBatteryToggle
-                anchors.verticalCenter: parent.verticalCenter
 
-                Binding {
-                    target: pauseOnBatteryToggle
-                    property: "checked"
-                    value: loadValue("pauseOnBattery", false)
-                }
-
-                onToggled: {
-                    saveValue("pauseOnBattery", checked)
-                }
+            onSliderValueChanged: (newValue) => {
+                ecoFpsDebounce.restart()
             }
         }
+
         StyledText {
-            text: "Freeze the wallpaper on its current frame while running on battery power (it still starts and shows its first frame)"
-            font.pixelSize: Theme.fontSizeSmall * 0.9
-            opacity: 0.5
-            width: parent.width
-            wrapMode: Text.Wrap
+            id: ecoFpsText
+            text: Math.round(ecoFpsSlider.value) + " FPS"
+            font.pixelSize: Theme.fontSizeSmall
+            width: 60
+            anchors.verticalCenter: parent.verticalCenter
+        }
+
+        Timer {
+            id: ecoFpsDebounce
+            interval: 400
+            onTriggered: saveValue("ecoFps", Math.round(ecoFpsSlider.value))
+        }
+    }
+
+    Repeater {
+        model: [
+            { key: "ecoMute", label: "Mute in Eco", description: "Fade the wallpaper's sound out in both eco modes (playing sound keeps the sound card awake)" },
+            { key: "ecoDisableParticles", label: "Low FPS: No Particles", description: "Snow, rain, sparks and fire are turned off at low FPS" },
+            { key: "ecoDisableMouse", label: "Low FPS: No Mouse", description: "The wallpaper doesn't react to the mouse at low FPS" },
+            { key: "ecoDisableParallax", label: "Low FPS: No Parallax", description: "No parallax at low FPS" }
+        ]
+
+        delegate: Column {
+            id: ecoToggleItem
+            required property var modelData
+            width: parent ? parent.width : 0
+            spacing: 2
+
+            Row {
+                width: parent.width
+                spacing: Theme.spacingM
+                StyledText {
+                    text: ecoToggleItem.modelData.label
+                    font.pixelSize: Theme.fontSizeSmall
+                    width: 180
+                    anchors.verticalCenter: parent.verticalCenter
+                }
+                DankToggle {
+                    id: ecoToggle
+                    anchors.verticalCenter: parent.verticalCenter
+
+                    Binding {
+                        target: ecoToggle
+                        property: "checked"
+                        value: loadValue(ecoToggleItem.modelData.key, true)
+                    }
+
+                    onToggled: {
+                        saveValue(ecoToggleItem.modelData.key, checked)
+                    }
+                }
+            }
+            StyledText {
+                text: ecoToggleItem.modelData.description
+                font.pixelSize: Theme.fontSizeSmall * 0.9
+                opacity: 0.5
+                width: parent.width
+                wrapMode: Text.Wrap
+            }
         }
     }
 
@@ -741,7 +806,7 @@ PluginSettings {
                 Binding {
                     target: staticWallpaperToggle
                     property: "checked"
-                    value: loadValue("generateStaticWallpaper", false)
+                    value: loadValue("generateStaticWallpaper", true)
                 }
 
                 onToggled: (checked) => {
@@ -750,7 +815,7 @@ PluginSettings {
             }
         }
         StyledText {
-            text: "Capture a screenshot of the animated wallpaper for lock screen and theme color extraction"
+            text: "Capture a screenshot of the animated wallpaper and set it as the DMS wallpaper underneath: it shows while the engine starts and if it crashes, on the lock screen and for theme colors. On by default"
             font.pixelSize: Theme.fontSizeSmall * 0.9
             opacity: 0.5
             width: parent.width
@@ -809,7 +874,7 @@ PluginSettings {
     Column {
         width: parent.width
         spacing: 2
-        visible: loadValue("generateStaticWallpaper", false)
+        visible: loadValue("generateStaticWallpaper", true)
 
         Row {
             width: parent.width
@@ -865,7 +930,7 @@ PluginSettings {
         opacity: 0.7
         wrapMode: Text.Wrap
         width: parent.width
-        visible: loadValue("generateStaticWallpaper", false)
+        visible: loadValue("generateStaticWallpaper", true)
     }
 
     Rectangle {

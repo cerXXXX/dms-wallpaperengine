@@ -28,10 +28,16 @@ PluginComponent {
     property var spanGroups: pluginData.spanGroups || []
     property var outputSettings: pluginData.outputSettings || {}
     property string activeType: pluginData.activeType || "scene"
-    property bool generateStaticWallpaper: pluginData.generateStaticWallpaper || false
+    // on by default: the screenshot under the engine is what shows while it starts and if it crashes
+    property bool generateStaticWallpaper: pluginData.generateStaticWallpaper !== false
     property bool prevGenerateStaticWallpaper: false
-    property bool pauseOnPowerSaver: pluginData.pauseOnPowerSaver || false
-    property bool pauseOnBattery: pluginData.pauseOnBattery || false
+    // power profile -> mode ("full", "eco", "lowfps"), see Utils.POWER_MODES
+    property var powerModes: pluginData.powerModes || ({})
+    property int ecoFps: pluginData.ecoFps || 5
+    property bool ecoMute: pluginData.ecoMute !== false
+    property bool ecoDisableParticles: pluginData.ecoDisableParticles !== false
+    property bool ecoDisableMouse: pluginData.ecoDisableMouse !== false
+    property bool ecoDisableParallax: pluginData.ecoDisableParallax !== false
     property bool lockScreenScenes: pluginData.lockScreenScenes !== false
     property var lockStreamProcesses: ({})
     property string assetsDir: pluginData.assetsDir || ""
@@ -49,6 +55,9 @@ PluginComponent {
     property var screenshotTimers: ({})
     property var projectInfos: ({})
     property bool ready: false
+    // the installed engine takes --control/--eco (patch 0009); probed once before the first launch
+    property bool engineProbed: false
+    property bool engineHasControl: false
     property bool haveMagick: false
     property bool paused: false
     property bool pickerOpen: false
@@ -57,14 +66,96 @@ PluginComponent {
     property string steamWorkshopPath: steamPaths[0]
     property int currentPathIndex: 0
 
-    readonly property bool shouldPauseWallpaper: {
-        if (pauseOnPowerSaver && typeof PowerProfiles !== "undefined" && PowerProfiles.profile === PowerProfile.PowerSaver) return true
-        if (pauseOnBattery && BatteryService.batteryAvailable && !BatteryService.isPluggedIn) return true
-        return false
+    // The power profile picks the mode (Utils.POWER_MODES) the wallpapers run in; the profile is the only
+    // trigger. Without power-profiles-daemon there's no profile and wallpapers run in full.
+    readonly property string powerProfile: {
+        if (typeof PowerProfiles === "undefined" || !powerProfilesDaemon) return "performance"
+        if (PowerProfiles.profile === PowerProfile.PowerSaver) return "powerSaver"
+        if (PowerProfiles.profile === PowerProfile.Balanced) return "balanced"
+        return "performance"
+    }
+    readonly property string wantedPowerMode: Utils.powerModeFor(powerModes, powerProfile)
+    // follows wantedPowerMode a second late, so flipping through profiles doesn't relaunch anything
+    property string powerMode: wantedPowerMode
+    onWantedPowerModeChanged: powerModeDebounce.restart()
+
+    Timer {
+        id: powerModeDebounce
+        interval: 1000
+        repeat: false
+        onTriggered: root.powerMode = root.wantedPowerMode
     }
 
-    // Pausing freezes the engine with SIGSTOP, but never before it has shown a frame: wallpapers
-    // still launch while paused (a cold start on power saver would otherwise leave the screen
+    // power-profiles-daemon answers on the system bus; without it PowerProfiles reports Balanced
+    property bool powerProfilesDaemon: true
+
+    Process {
+        id: powerProfilesProbe
+        command: ["sh", "-c", "busctl --system status org.freedesktop.UPower.PowerProfiles >/dev/null 2>&1 || busctl --system status net.hadess.PowerProfiles >/dev/null 2>&1"]
+        onExited: (code) => { root.powerProfilesDaemon = code === 0 }
+    }
+
+    // An engine with the control channel (0009) is held still by the engine itself (--eco, "eco on") and keeps
+    // running; an older engine is frozen with SIGSTOP in eco instead. A function, not a binding: onPowerModeChanged
+    // runs before bindings on powerMode are updated and would read the previous mode's value.
+    function freezeWithSignal() {
+        return !engineHasControl && powerMode === "eco"
+    }
+
+    function wallpaperHeld(proc) {
+        return powerMode !== "full" && Utils.holdsInPowerMode(powerMode, wallpaperType(proc.sceneId))
+    }
+
+    function wallpaperMuted() {
+        return powerMode !== "full" && ecoMute
+    }
+
+    // tells a running engine the current mode; it only writes what changed
+    function sendPowerMode(proc) {
+        if (!engineHasControl || !proc) return
+        const held = wallpaperHeld(proc)
+        const muted = wallpaperMuted()
+        if (proc.sentHeld !== held) {
+            proc.write(held ? "eco on\n" : "eco off\n")
+            proc.sentHeld = held
+        }
+        if (proc.sentMuted !== muted) {
+            proc.write(muted ? "mute on\n" : "mute off\n")
+            proc.sentMuted = muted
+        }
+    }
+
+    function applyPowerMode() {
+        if (!ready) return
+        console.info("LinuxWallpaperEngine: power mode", powerMode, "(profile " + powerProfile + ")")
+        if (engineHasControl) {
+            for (const key in processes) sendPowerMode(processes[key])
+            // low FPS changes the launch settings, syncing relaunches what needs it
+            syncScenesWithData()
+            restartPlaylistTimers()
+        } else if (freezeWithSignal()) {
+            pauseOutputs()
+        } else {
+            resumeOutputs()
+        }
+        updateLockStreams()
+    }
+
+    onPowerModeChanged: applyPowerMode()
+
+    Process {
+        id: engineProbe
+        command: ["sh", "-c", "linux-wallpaperengine --help 2>/dev/null | grep -q -- --control"]
+        onExited: (code) => {
+            root.engineHasControl = code === 0
+            root.engineProbed = true
+            console.info("LinuxWallpaperEngine: engine control channel", root.engineHasControl ? "available" : "missing (old engine, eco freezes it)")
+            root.syncScenesWithData()
+        }
+    }
+
+    // An older engine is frozen with SIGSTOP in eco, but never before it has shown a frame: wallpapers
+    // still launch in eco (a cold start on power saver would otherwise leave the screen
     // empty) and are frozen once their first frame is up. The patched engine prints
     // firstFrameMarker when the compositor has shown a frame with the wallpaper's content (a
     // video's first decoded frame, not the empty texture before it); an engine without the
@@ -118,7 +209,7 @@ PluginComponent {
     function firstFramePresented(proc) {
         if (proc.presentedAt > 0) return
         proc.presentedAt = Date.now()
-        if (shouldPauseWallpaper) scheduleFreeze(proc)
+        if (freezeWithSignal()) scheduleFreeze(proc)
     }
 
     Component {
@@ -141,17 +232,42 @@ PluginComponent {
 
     // Scenes on the lock screen: niri draws nothing but the lock surface while locked, so the engine's
     // layer can't show through. While locked (and the screens are on) every screen's scene is rendered
-    // offscreen by a second engine that streams it (--stream, patched engine) to a local UDP port; the
-    // patched DMS lock screen plays the lockStreams URLs.
-    readonly property bool streamLockScenes: ready && lockScreenScenes && !shouldPauseWallpaper
-        && IdleService.isShellLocked && !IdleService.monitorsOff
+    // offscreen by a second engine. In full mode it streams the scene (--stream, patched engine) to a local
+    // UDP port and the patched DMS lock screen plays the lockStreams URLs; in eco it holds the scene still and
+    // writes a frame whenever it changes (--frame-file, 0009) and the lock screen shows the lockFrames images.
+    // An older engine only streams, in full mode.
+    // the binding notices locking; updateLockStreams computes it again (it also runs on a power mode change,
+    // before this binding is updated)
+    readonly property bool streamLockScenes: lockScenesWanted()
     onStreamLockScenesChanged: updateLockStreams()
 
+    function lockScenesWanted() {
+        return ready && lockScreenScenes && (powerMode === "full" || engineHasControl)
+            && IdleService.isShellLocked && !IdleService.monitorsOff
+    }
+
     readonly property int lockStreamBasePort: 41300
+    // { monitor: "file://...ppm?<n>" }, a new URL for every frame so the image reloads
+    property var lockFrameUrls: ({})
+
+    function lockFramePath(monitor) {
+        const runtimeDir = Paths.strip(StandardPaths.writableLocation(StandardPaths.RuntimeLocation).toString())
+        return runtimeDir + "/we-lock-" + monitor + ".ppm"
+    }
+
+    function lockFrameWritten(monitor, proc) {
+        if (lockStreamProcesses[monitor] !== proc) return
+        proc.frames++
+        const urls = Object.assign({}, lockFrameUrls)
+        urls[monitor] = "file://" + proc.frameFile + "?" + proc.frames
+        lockFrameUrls = urls
+        PluginService.setGlobalVar(pluginId, "lockFrames", urls)
+    }
 
     function updateLockStreams() {
         const wanted = {}
-        if (streamLockScenes) {
+        const frames = powerMode !== "full"
+        if (lockScenesWanted()) {
             let index = 0
             for (const o of computeOutputs()) {
                 // spans would need the stream cropped per screen; their lock screens keep the screenshot
@@ -165,6 +281,7 @@ PluginComponent {
                     sceneId: sceneId,
                     owner: o.owner,
                     port: lockStreamBasePort + index++,
+                    frameFile: frames ? lockFramePath(o.monitors[0]) : "",
                     size: [Math.round(screen.width * scale), Math.round(screen.height * scale)]
                 }
             }
@@ -174,19 +291,24 @@ PluginComponent {
         for (const monitor in lockStreamProcesses) {
             const proc = lockStreamProcesses[monitor]
             const want = wanted[monitor]
-            if (want && proc.sceneId === want.sceneId && proc.port === want.port) continue
+            if (want && proc.sceneId === want.sceneId && proc.port === want.port && proc.frameFile === want.frameFile) continue
             proc.running = false
             proc.destroy()
             delete lockStreamProcesses[monitor]
         }
+        const frameUrls = {}
         for (const monitor in wanted) {
             const want = wanted[monitor]
             if (!lockStreamProcesses[monitor]) {
                 const proc = lockStreamComponent.createObject(root, {
+                    monitor: monitor,
                     sceneId: want.sceneId,
                     port: want.port,
+                    frameFile: want.frameFile,
                     command: CommandBuilder.buildCommandArgs({
-                        streamTarget: "udp://127.0.0.1:" + want.port + "?pkt_size=1316",
+                        streamTarget: want.frameFile ? "" : "udp://127.0.0.1:" + want.port + "?pkt_size=1316",
+                        frameFile: want.frameFile,
+                        eco: !!want.frameFile,
                         streamSize: want.size,
                         sceneId: want.sceneId,
                         settings: getOutputSettings(want.owner, want.sceneId),
@@ -197,35 +319,43 @@ PluginComponent {
                 lockStreamProcesses[monitor] = proc
                 proc.running = true
             }
-            streams[monitor] = "udp://127.0.0.1:" + want.port
+            if (want.frameFile) {
+                // the lock screen keeps its screenshot until the first frame is written
+                if (lockFrameUrls[monitor]) frameUrls[monitor] = lockFrameUrls[monitor]
+            } else {
+                streams[monitor] = "udp://127.0.0.1:" + want.port
+            }
         }
 
         const current = PluginService.getGlobalVar(pluginId, "lockStreams", {})
         if (!Utils.deepEqual(current, streams)) PluginService.setGlobalVar(pluginId, "lockStreams", streams)
+        if (!Utils.deepEqual(lockFrameUrls, frameUrls)) {
+            lockFrameUrls = frameUrls
+            PluginService.setGlobalVar(pluginId, "lockFrames", frameUrls)
+        }
     }
 
     Component {
         id: lockStreamComponent
 
         Process {
+            id: lockProc
+            property string monitor: ""
             property string sceneId: ""
             property int port: 0
+            property string frameFile: ""
+            property int frames: 0
+
+            stdout: SplitParser {
+                onRead: (data) => {
+                    if (lockProc.frameFile && data.indexOf("Frame written") !== -1) root.lockFrameWritten(lockProc.monitor, lockProc)
+                }
+            }
 
             onExited: (code) => {
                 if (code !== 0)
                     console.warn("LinuxWallpaperEngine: lock screen stream of", sceneId, "exited with code", code)
             }
-        }
-    }
-
-    onShouldPauseWallpaperChanged: {
-        if (!ready) return
-        if (shouldPauseWallpaper) {
-            console.info("LinuxWallpaperEngine: Pausing wallpapers (power state change)")
-            pauseOutputs()
-        } else {
-            console.info("LinuxWallpaperEngine: Resuming wallpapers (power state change)")
-            resumeOutputs()
         }
     }
 
@@ -295,7 +425,15 @@ PluginComponent {
         merged.properties = scene.properties || {}
         merged.hiddenLayers = Array.isArray(scene.hiddenLayers) ? scene.hiddenLayers : []
         merged.disabledEffects = Array.isArray(scene.disabledEffects) ? scene.disabledEffects : []
-        return merged
+        const lowFps = Utils.settingsForPowerMode(merged, powerMode, wallpaperType(sceneId), {
+            fps: ecoFps,
+            disableParticles: ecoDisableParticles,
+            disableMouse: ecoDisableMouse,
+            disableParallax: ecoDisableParallax
+        })
+        // an older engine can't fade the sound out on a running wallpaper
+        if (powerMode === "lowfps" && ecoMute && !engineHasControl) lowFps.silent = true
+        return lowFps
     }
 
     // "scene", "video" or "web" from the wallpaper's project.json, "" if it can't be read.
@@ -325,7 +463,7 @@ PluginComponent {
     // video each monitor shows: it plays that video instead of the static screenshot.
     function publishLockVideos() {
         const videos = {}
-        if (ready && !shouldPauseWallpaper) {
+        if (ready && powerMode === "full") {
             for (const o of computeOutputs()) {
                 const info = projectInfo(ownerCurrentScene(o.owner))
                 if (!info.file) continue
@@ -767,7 +905,8 @@ PluginComponent {
     }
 
     function syncScenesWithData() {
-        if (!ready) return
+        // the first launch waits for the engine probe, so it starts with the right flags
+        if (!ready || !engineProbed) return
 
         const outputs = computeOutputs()
         const outputKeys = {}
@@ -840,7 +979,11 @@ PluginComponent {
             }
         }
 
+        const held = powerMode !== "full" && Utils.holdsInPowerMode(powerMode, wallpaperType(sceneId))
         const weProc = weProcessComponent.createObject(root, {
+            control: engineHasControl,
+            launchHeld: engineHasControl && held,
+            launchMuted: engineHasControl && wallpaperMuted(),
             outputKey: key,
             screenMode: newSig.mode,
             screenValue: newSig.value,
@@ -859,7 +1002,7 @@ PluginComponent {
         weProc.running = true
         processStartTimes[key] = Date.now()
         delete pendingLaunches[key]
-        if (shouldPauseWallpaper) scheduleFreeze(weProc)
+        if (freezeWithSignal()) scheduleFreeze(weProc)
 
         cancelScreenshotTimer(key)
         if (useScreenshot) {
@@ -1071,7 +1214,7 @@ PluginComponent {
     // independently. An interval of 0 means manual: no timer, IPC-only swap.
     function restartPlaylistTimers() {
         const wanted = {}
-        if (ready && !shouldPauseWallpaper) {
+        if (ready && powerMode === "full") {
             const owners = collectActiveOwners()
             for (const o of owners) {
                 if (hasActivePlaylist(o)) wanted[o] = true
@@ -1191,6 +1334,7 @@ PluginComponent {
         function list(): string { return root.ipcList() }
         function lockVideos(): string { return JSON.stringify(PluginService.getGlobalVar(root.pluginId, "lockVideos", {})) }
         function lockStreams(): string { return JSON.stringify(PluginService.getGlobalVar(root.pluginId, "lockStreams", {})) }
+        function lockFrames(): string { return JSON.stringify(PluginService.getGlobalVar(root.pluginId, "lockFrames", {})) }
         function picker(): string { return root.openPicker("") }
         function pickerMonitor(monitor: string): string { return root.openPicker(monitor) }
         function playlistCreate(name: string): string { return root.createNamedPlaylist(name) }
@@ -1227,8 +1371,18 @@ PluginComponent {
             property double presentedAt: 0
             property bool frozen: false
             property var freezeTimer: null
+            // control channel (0009): the mode it was launched in, then what it was last told (sendPowerMode)
+            property bool control: false
+            property bool launchHeld: false
+            property bool launchMuted: false
+            property bool sentHeld: launchHeld
+            property bool sentMuted: launchMuted
 
+            stdinEnabled: control
             command: CommandBuilder.buildCommandArgs({
+                control: control,
+                eco: launchHeld,
+                muted: launchMuted,
                 screenMode: screenMode,
                 screenValue: screenValue,
                 sceneId: sceneId,
@@ -1268,8 +1422,8 @@ PluginComponent {
                     }
                     if (root.crashCounts[outputKey] >= 3) {
                         console.warn("LinuxWallpaperEngine: scene", sceneId, "on", screenValue, "crashed 3 times in a row; not restarting")
-                    } else if (root.ready && !useScreenshot) {
-                        // also while paused: the relaunch shows its first frame, then freezes
+                    } else if (root.ready) {
+                        // also in eco: the relaunch shows its first frame, then holds (or freezes)
                         processRestartTimer.restart()
                     }
                     destroy()
@@ -1312,7 +1466,7 @@ PluginComponent {
             repeat: true
             interval: 5 * 60 * 1000
             onTriggered: {
-                if (!ready || shouldPauseWallpaper) return
+                if (!ready || powerMode !== "full") return
                 if (hasActivePlaylist(ownerKey)) {
                     bumpIndex(ownerKey, 1)
                     syncScenesWithData()
@@ -1387,7 +1541,9 @@ PluginComponent {
         Utils.ensureNamedPlaylists(store())
         magickProbe.command = ["sh", "-c", "command -v magick >/dev/null 2>&1"]
         magickProbe.running = true
-        syncScenesWithData()
+        powerProfilesProbe.running = true
+        // syncs once it knows what the engine can do
+        engineProbe.running = true
     }
 
     Process {
@@ -1488,6 +1644,7 @@ PluginComponent {
         console.info("LinuxWallpaperEngine: Plugin stopping, cleaning up processes")
         PluginService.setGlobalVar(pluginId, "lockVideos", {})
         PluginService.setGlobalVar(pluginId, "lockStreams", {})
+        PluginService.setGlobalVar(pluginId, "lockFrames", {})
         for (const monitor in lockStreamProcesses) {
             lockStreamProcesses[monitor].running = false
             lockStreamProcesses[monitor].destroy()

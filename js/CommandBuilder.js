@@ -8,12 +8,18 @@ function buildCommandArgs(o) {
 
     // o.streamTarget: render offscreen at o.streamSize ([w, h]) and stream the frames there (patched
     // engine, used for the lock screen) instead of drawing on a screen
-    var streaming = !!o.streamTarget
+    // o.frameFile: the same, but write each changed frame of the held wallpaper to that file (lock screen in eco)
+    var streaming = !!o.streamTarget || !!o.frameFile
     if (streaming) {
         args.push("--window")
         args.push("0x0x" + o.streamSize[0] + "x" + o.streamSize[1])
-        args.push("--stream")
-        args.push(o.streamTarget)
+        if (o.frameFile) {
+            args.push("--frame-file")
+            args.push(o.frameFile)
+        } else {
+            args.push("--stream")
+            args.push(o.streamTarget)
+        }
     } else if (o.screenMode === "span") {
         args.push("--screen-span")
         args.push(o.screenValue)
@@ -98,8 +104,16 @@ function buildCommandArgs(o) {
     if (o.settings.disableParallax) args.push("--disable-parallax")
     if (o.settings.noAutoMute) args.push("--noautomute")
     if (o.settings.noAudioProcessing) args.push("--no-audio-processing")
-    if (streaming || o.settings.noFullscreenPause) args.push("--no-fullscreen-pause")
+    // niri stops asking for frames of a wallpaper that opaque windows cover, and keeps it moving under see-through
+    // ones; the engine's own pause would also stop it under a see-through fullscreen terminal
+    if (streaming || o.settings.noFullscreenPause !== false) args.push("--no-fullscreen-pause")
     if (o.settings.fullscreenPauseOnlyActive) args.push("--fullscreen-pause-only-active")
+
+    // patched engine (0009): o.control takes commands on stdin (eco on/off, mute on/off), o.eco starts held still,
+    // o.muted starts with the sound faded out
+    if (o.control) args.push("--control")
+    if (o.eco) args.push("--eco")
+    if (o.muted) args.push("--muted")
 
     return args
 }

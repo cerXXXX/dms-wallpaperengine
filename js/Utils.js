@@ -27,30 +27,24 @@ function pkillPattern(sig) {
     return ".*linux-wallpaperengine.*--" + sig.flag + " " + escapeRegex(sig.value) + "($| )"
 }
 
+// plain data for comparing: arrays (also the array-likes a list becomes after a round trip through a QML var
+// property, which Array.isArray rejects) as arrays, objects with sorted keys, undefined values dropped
+function canonicalData(v) {
+    if (v === null || typeof v !== "object") return v
+    if (Array.isArray(v) || typeof v.length === "number") return Array.prototype.map.call(v, canonicalData)
+    const out = {}
+    const keys = Object.keys(v).sort()
+    for (let i = 0; i < keys.length; ++i) {
+        if (v[keys[i]] !== undefined) out[keys[i]] = canonicalData(v[keys[i]])
+    }
+    return out
+}
+
 function deepEqual(a, b) {
     if (a === b) return true
     if (a === null || b === null) return false
     if (typeof a !== "object" || typeof b !== "object") return false
-
-    const aIsArray = Array.isArray(a)
-    const bIsArray = Array.isArray(b)
-    if (aIsArray !== bIsArray) return false
-
-    if (aIsArray) {
-        if (a.length !== b.length) return false
-        for (let i = 0; i < a.length; ++i) if (!deepEqual(a[i], b[i])) return false
-        return true
-    }
-
-    const aKeys = Object.keys(a)
-    const bKeys = Object.keys(b)
-    if (aKeys.length !== bKeys.length) return false
-    for (let i = 0; i < aKeys.length; ++i) {
-        const key = aKeys[i]
-        if (!b.hasOwnProperty(key)) return false
-        if (!deepEqual(a[key], b[key])) return false
-    }
-    return true
+    return JSON.stringify(canonicalData(a)) === JSON.stringify(canonicalData(b))
 }
 
 // ---------------------------------------------------------------------------
@@ -337,7 +331,7 @@ var SCENE_OVERRIDE_DEFS = [
     { key: "disableParticles", label: "Disable Particles", type: "bool", def: false },
     { key: "downscaleToOutput", label: "Downscale to Screen", type: "bool", def: false },
     { key: "disableParallax", label: "Disable Parallax", type: "bool", def: false },
-    { key: "noFullscreenPause", label: "No Fullscreen Pause", type: "bool", def: false },
+    { key: "noFullscreenPause", label: "No Fullscreen Pause", type: "bool", def: true },
     { key: "fullscreenPauseOnlyActive", label: "Pause Only Active", type: "bool", def: false },
     { key: "noAutoMute", label: "No Auto Mute", type: "bool", def: false },
     { key: "noAudioProcessing", label: "No Audio Processing", type: "bool", def: false },
@@ -427,4 +421,61 @@ function sceneOverridesSummary(overrides) {
         if (o[d.key] !== undefined) parts.push(d.label + " " + formatSceneOverrideValue(d, o[d.key]))
     }
     return parts.join(", ")
+}
+
+// Power modes: what wallpapers do under each power profile. "full" animates; "eco" holds the wallpaper still and
+// only shows frames that change (clocks, dates); "lowfps" keeps it moving at the eco FPS with the chosen parts off.
+// Videos never play at a low FPS (they're decoded in full anyway), they hold their frame in both eco modes.
+var POWER_MODES = [
+    { key: "full", label: "Full" },
+    { key: "eco", label: "Eco: update on change" },
+    { key: "lowfps", label: "Eco: low FPS" }
+]
+
+var POWER_PROFILES = [
+    { key: "performance", label: "Performance", def: "full" },
+    { key: "balanced", label: "Balanced", def: "eco" },
+    { key: "powerSaver", label: "Power Saver", def: "eco" }
+]
+
+function powerModeFor(powerModes, profile) {
+    var mode = (powerModes || {})[profile]
+    for (var i = 0; i < POWER_MODES.length; i++) {
+        if (POWER_MODES[i].key === mode) return mode
+    }
+    for (var j = 0; j < POWER_PROFILES.length; j++) {
+        if (POWER_PROFILES[j].key === profile) return POWER_PROFILES[j].def
+    }
+    return "full"
+}
+
+function powerModeLabel(mode) {
+    for (var i = 0; i < POWER_MODES.length; i++) {
+        if (POWER_MODES[i].key === mode) return POWER_MODES[i].label
+    }
+    return POWER_MODES[0].label
+}
+
+function powerModeKey(label) {
+    for (var i = 0; i < POWER_MODES.length; i++) {
+        if (POWER_MODES[i].label === label) return POWER_MODES[i].key
+    }
+    return "full"
+}
+
+// if a wallpaper of this type is held still (only changed frames shown) in this power mode
+function holdsInPowerMode(mode, wallpaperType) {
+    return mode === "eco" || (mode === "lowfps" && wallpaperType === "video")
+}
+
+// the launch settings of a wallpaper in this power mode: low FPS lowers the FPS (never raises it) and turns the
+// chosen parts off. eco: { fps, disableParticles, disableMouse, disableParallax }
+function settingsForPowerMode(settings, mode, wallpaperType, eco) {
+    if (mode !== "lowfps" || wallpaperType === "video") return settings
+    var s = Object.assign({}, settings)
+    s.fps = Math.min(s.fps || 30, eco.fps)
+    if (eco.disableParticles) s.disableParticles = true
+    if (eco.disableMouse) s.disableMouse = true
+    if (eco.disableParallax) s.disableParallax = true
+    return s
 }
