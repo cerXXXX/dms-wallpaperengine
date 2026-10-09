@@ -63,6 +63,82 @@ PluginComponent {
         return false
     }
 
+    // Pausing freezes the engine with SIGSTOP, but never before it has shown a frame: wallpapers
+    // still launch while paused (a cold start on power saver would otherwise leave the screen
+    // empty) and are frozen once their first frame is up. The patched engine prints
+    // firstFrameMarker when the compositor has shown a frame with the wallpaper's content (a
+    // video's first decoded frame, not the empty texture before it); an engine without the
+    // marker is frozen firstFrameTimeoutMs after its launch instead.
+    readonly property string firstFrameMarker: "First frame presented"
+    readonly property int firstFrameTimeoutMs: 15000
+    // intros fading in from black would freeze on a black frame, so play this long after the first one
+    readonly property int freezeWarmupMs: 1000
+
+    function scheduleFreeze(proc) {
+        if (!proc || proc.frozen) return
+        cancelFreeze(proc)
+        const now = Date.now()
+        let at = proc.presentedAt > 0 ? proc.presentedAt + freezeWarmupMs : proc.startedAt + firstFrameTimeoutMs
+        // the static screenshot is captured on its own timer, let it happen first
+        if (proc.useScreenshot) at = Math.max(at, proc.startedAt + screenshotCaptureWaitMs(proc.settings))
+        if (at <= now) {
+            freezeNow(proc)
+            return
+        }
+        proc.freezeTimer = freezeTimerComponent.createObject(root, { proc: proc, interval: at - now })
+        proc.freezeTimer.running = true
+    }
+
+    function freezeNow(proc) {
+        cancelFreeze(proc)
+        const pid = proc.processId
+        if (pid === undefined || pid <= 0) return
+        Quickshell.execDetached(["kill", "-STOP", String(pid)])
+        proc.frozen = true
+    }
+
+    // Also before terminating a frozen process: a stopped process only handles SIGTERM once it
+    // is continued (the order of the two signals doesn't matter).
+    function thawProcess(proc) {
+        if (!proc) return
+        cancelFreeze(proc)
+        if (!proc.frozen) return
+        proc.frozen = false
+        const pid = proc.processId
+        if (pid !== undefined && pid > 0) Quickshell.execDetached(["kill", "-CONT", String(pid)])
+    }
+
+    function cancelFreeze(proc) {
+        if (!proc.freezeTimer) return
+        proc.freezeTimer.running = false
+        proc.freezeTimer.destroy()
+        proc.freezeTimer = null
+    }
+
+    function firstFramePresented(proc) {
+        if (proc.presentedAt > 0) return
+        proc.presentedAt = Date.now()
+        if (shouldPauseWallpaper) scheduleFreeze(proc)
+    }
+
+    Component {
+        id: freezeTimerComponent
+
+        Timer {
+            id: freezeTimer
+            property var proc: null
+
+            repeat: false
+            onTriggered: {
+                if (proc && proc.freezeTimer === freezeTimer) {
+                    proc.freezeTimer = null
+                    root.freezeNow(proc)
+                }
+                destroy()
+            }
+        }
+    }
+
     // Scenes on the lock screen: niri draws nothing but the lock surface while locked, so the engine's
     // layer can't show through. While locked (and the screens are on) every screen's scene is rendered
     // offscreen by a second engine that streams it (--stream, patched engine) to a local UDP port; the
@@ -734,7 +810,7 @@ PluginComponent {
             const processNotRunning = !oldProc
             const isPending = pendingLaunches[o.key]
 
-            if ((sceneChanged || settingsChanged || processNotRunning || forceNoAudioChanged || screenArgsChanged) && !isPending && !shouldPauseWallpaper) {
+            if ((sceneChanged || settingsChanged || processNotRunning || forceNoAudioChanged || screenArgsChanged) && !isPending) {
                 launchOutput(o, sceneId, forceNoAudio)
             }
         }
@@ -744,7 +820,7 @@ PluginComponent {
     }
 
     function startOutput(key, output, sceneId, forceNoAudio) {
-        if (!root.ready || root.shouldPauseWallpaper) {
+        if (!root.ready) {
             delete pendingLaunches[key]
             return
         }
@@ -783,6 +859,7 @@ PluginComponent {
         weProc.running = true
         processStartTimes[key] = Date.now()
         delete pendingLaunches[key]
+        if (shouldPauseWallpaper) scheduleFreeze(weProc)
 
         cancelScreenshotTimer(key)
         if (useScreenshot) {
@@ -903,6 +980,7 @@ PluginComponent {
         }
 
         if (processes[key]) {
+            thawProcess(processes[key])
             processes[key].running = false
             processes[key].destroy()
             delete processes[key]
@@ -935,6 +1013,7 @@ PluginComponent {
             if (pid !== undefined && pid > 0) {
                 Quickshell.execDetached(["kill", String(pid)])
             }
+            thawProcess(processes[key])
             processes[key].running = false
             processes[key].destroy()
             delete processes[key]
@@ -953,36 +1032,19 @@ PluginComponent {
         for (const key in rotationTimers) {
             rotationTimers[key].running = false
         }
-        for (const key in processes) {
-            const proc = processes[key]
-            if (proc) {
-                const pid = proc.processId
-                if (pid !== undefined && pid > 0) {
-                    Quickshell.execDetached(["kill", "-STOP", String(pid)])
-                }
-            }
-        }
+        for (const key in processes) scheduleFreeze(processes[key])
     }
 
     function resumeOutputs() {
         paused = false
-        const frozenKeys = []
-        for (const key in processes) frozenKeys.push(key)
+        for (const key in processes) thawProcess(processes[key])
         syncScenesWithData()
-        for (const key of frozenKeys) {
-            const proc = processes[key]
-            if (proc) {
-                const pid = proc.processId
-                if (pid !== undefined && pid > 0) {
-                    Quickshell.execDetached(["kill", "-CONT", String(pid)])
-                }
-            }
-        }
     }
 
     function stopAllOutputs() {
         for (const key in processes) {
             if (processes[key]) {
+                thawProcess(processes[key])
                 processes[key].running = false
                 processes[key].destroy()
             }
@@ -1160,6 +1222,11 @@ PluginComponent {
             property bool forceNoAudio: false
             property string assetsDir: ""
             property string backgroundsDir: ""
+            // pausing state, see scheduleFreeze
+            property double startedAt: Date.now()
+            property double presentedAt: 0
+            property bool frozen: false
+            property var freezeTimer: null
 
             command: CommandBuilder.buildCommandArgs({
                 screenMode: screenMode,
@@ -1173,7 +1240,14 @@ PluginComponent {
                 backgroundsDir: backgroundsDir
             })
 
+            stdout: SplitParser {
+                onRead: (data) => {
+                    if (weProc.presentedAt === 0 && data.indexOf(root.firstFrameMarker) !== -1) root.firstFramePresented(weProc)
+                }
+            }
+
             onExited: (code) => {
+                root.cancelFreeze(weProc)
                 if (code !== 0) {
                     console.warn("LinuxWallpaperEngine: Process exited with code:", code, "for scene", sceneId, "on", screenValue)
                 }
@@ -1194,7 +1268,8 @@ PluginComponent {
                     }
                     if (root.crashCounts[outputKey] >= 3) {
                         console.warn("LinuxWallpaperEngine: scene", sceneId, "on", screenValue, "crashed 3 times in a row; not restarting")
-                    } else if (root.ready && !root.shouldPauseWallpaper && !useScreenshot) {
+                    } else if (root.ready && !useScreenshot) {
+                        // also while paused: the relaunch shows its first frame, then freezes
                         processRestartTimer.restart()
                     }
                     destroy()
@@ -1420,6 +1495,7 @@ PluginComponent {
 
         for (const key in processes) {
             if (processes[key]) {
+                thawProcess(processes[key])
                 processes[key].running = false
                 processes[key].destroy()
             }

@@ -660,7 +660,7 @@ PluginSettings {
             }
         }
         StyledText {
-            text: "Stop wallpaper when power saver profile is active"
+            text: "Freeze the wallpaper on its current frame while the power saver profile is active (it still starts and shows its first frame)"
             font.pixelSize: Theme.fontSizeSmall * 0.9
             opacity: 0.5
             width: parent.width
@@ -697,7 +697,7 @@ PluginSettings {
             }
         }
         StyledText {
-            text: "Stop wallpaper when running on battery power"
+            text: "Freeze the wallpaper on its current frame while running on battery power (it still starts and shows its first frame)"
             font.pixelSize: Theme.fontSizeSmall * 0.9
             opacity: 0.5
             width: parent.width
