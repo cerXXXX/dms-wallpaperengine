@@ -6,14 +6,23 @@ function buildCommandArgs(o) {
         args.push(o.assetsDir)
     }
 
-    if (o.screenMode === "span") {
+    // o.streamTarget: render offscreen at o.streamSize ([w, h]) and stream the frames there (patched
+    // engine, used for the lock screen) instead of drawing on a screen
+    var streaming = !!o.streamTarget
+    if (streaming) {
+        args.push("--window")
+        args.push("0x0x" + o.streamSize[0] + "x" + o.streamSize[1])
+        args.push("--stream")
+        args.push(o.streamTarget)
+    } else if (o.screenMode === "span") {
         args.push("--screen-span")
+        args.push(o.screenValue)
     } else {
         args.push("--screen-root")
+        args.push(o.screenValue)
     }
-    args.push(o.screenValue)
 
-    if (o.useScreenshot && o.screenshotPath) {
+    if (!streaming && o.useScreenshot && o.screenshotPath) {
         args.push("--screenshot")
         args.push(o.screenshotPath)
         var screenshotDelay = o.settings.screenshotDelay || 5
@@ -32,7 +41,7 @@ function buildCommandArgs(o) {
     }
     args.push(bgArg)
 
-    if (o.forceNoAudio || o.settings.silent !== false) {
+    if (streaming || o.forceNoAudio || o.settings.silent !== false) {
         args.push("--silent")
     } else {
         var volume = o.settings.volume
@@ -60,8 +69,10 @@ function buildCommandArgs(o) {
     // "bottom" per the protocol, making the order deterministic. On niri it
     // additionally pairs with place-within-backdrop layer-rules so the
     // wallpaper isn't cloned into every overview workspace card.
-    args.push("--layer")
-    args.push("background")
+    if (!streaming) {
+        args.push("--layer")
+        args.push("background")
+    }
 
     var sceneProps = o.settings.properties || {}
     for (var propName in sceneProps) {
@@ -75,7 +86,7 @@ function buildCommandArgs(o) {
     if (o.settings.disableParallax) args.push("--disable-parallax")
     if (o.settings.noAutoMute) args.push("--noautomute")
     if (o.settings.noAudioProcessing) args.push("--no-audio-processing")
-    if (o.settings.noFullscreenPause) args.push("--no-fullscreen-pause")
+    if (streaming || o.settings.noFullscreenPause) args.push("--no-fullscreen-pause")
     if (o.settings.fullscreenPauseOnlyActive) args.push("--fullscreen-pause-only-active")
 
     return args

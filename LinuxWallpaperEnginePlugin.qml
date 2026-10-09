@@ -32,6 +32,8 @@ PluginComponent {
     property bool prevGenerateStaticWallpaper: false
     property bool pauseOnPowerSaver: pluginData.pauseOnPowerSaver || false
     property bool pauseOnBattery: pluginData.pauseOnBattery || false
+    property bool lockScreenScenes: pluginData.lockScreenScenes !== false
+    property var lockStreamProcesses: ({})
     property string assetsDir: pluginData.assetsDir || ""
     property string backgroundsDir: pluginData.backgroundsDir || ""
 
@@ -59,6 +61,85 @@ PluginComponent {
         if (pauseOnPowerSaver && typeof PowerProfiles !== "undefined" && PowerProfiles.profile === PowerProfile.PowerSaver) return true
         if (pauseOnBattery && BatteryService.batteryAvailable && !BatteryService.isPluggedIn) return true
         return false
+    }
+
+    // Scenes on the lock screen: niri draws nothing but the lock surface while locked, so the engine's
+    // layer can't show through. While locked (and the screens are on) every screen's scene is rendered
+    // offscreen by a second engine that streams it (--stream, patched engine) to a local UDP port; the
+    // patched DMS lock screen plays the lockStreams URLs.
+    readonly property bool streamLockScenes: ready && lockScreenScenes && !shouldPauseWallpaper
+        && IdleService.isShellLocked && !IdleService.monitorsOff
+    onStreamLockScenesChanged: updateLockStreams()
+
+    readonly property int lockStreamBasePort: 41300
+
+    function updateLockStreams() {
+        const wanted = {}
+        if (streamLockScenes) {
+            let index = 0
+            for (const o of computeOutputs()) {
+                // spans would need the stream cropped per screen; their lock screens keep the screenshot
+                if (o.kind !== "single") continue
+                const sceneId = ownerCurrentScene(o.owner)
+                if (projectInfo(sceneId).type !== "scene") continue
+                const screen = Quickshell.screens.find(s => s.name === o.monitors[0])
+                if (!screen) continue
+                const scale = screen.devicePixelRatio || 1
+                wanted[o.monitors[0]] = {
+                    sceneId: sceneId,
+                    owner: o.owner,
+                    port: lockStreamBasePort + index++,
+                    size: [Math.round(screen.width * scale), Math.round(screen.height * scale)]
+                }
+            }
+        }
+
+        const streams = {}
+        for (const monitor in lockStreamProcesses) {
+            const proc = lockStreamProcesses[monitor]
+            const want = wanted[monitor]
+            if (want && proc.sceneId === want.sceneId && proc.port === want.port) continue
+            proc.running = false
+            proc.destroy()
+            delete lockStreamProcesses[monitor]
+        }
+        for (const monitor in wanted) {
+            const want = wanted[monitor]
+            if (!lockStreamProcesses[monitor]) {
+                const proc = lockStreamComponent.createObject(root, {
+                    sceneId: want.sceneId,
+                    port: want.port,
+                    command: CommandBuilder.buildCommandArgs({
+                        streamTarget: "udp://127.0.0.1:" + want.port + "?pkt_size=1316",
+                        streamSize: want.size,
+                        sceneId: want.sceneId,
+                        settings: getOutputSettings(want.owner, want.sceneId),
+                        assetsDir: assetsDir,
+                        backgroundsDir: backgroundsDir
+                    })
+                })
+                lockStreamProcesses[monitor] = proc
+                proc.running = true
+            }
+            streams[monitor] = "udp://127.0.0.1:" + want.port
+        }
+
+        const current = PluginService.getGlobalVar(pluginId, "lockStreams", {})
+        if (!Utils.deepEqual(current, streams)) PluginService.setGlobalVar(pluginId, "lockStreams", streams)
+    }
+
+    Component {
+        id: lockStreamComponent
+
+        Process {
+            property string sceneId: ""
+            property int port: 0
+
+            onExited: (code) => {
+                if (code !== 0)
+                    console.warn("LinuxWallpaperEngine: lock screen stream of", sceneId, "exited with code", code)
+            }
+        }
     }
 
     onShouldPauseWallpaperChanged: {
@@ -1045,6 +1126,7 @@ PluginComponent {
         function set(sceneId: string, monitor: string): string { return root.ipcSet(sceneId, monitor) }
         function list(): string { return root.ipcList() }
         function lockVideos(): string { return JSON.stringify(PluginService.getGlobalVar(root.pluginId, "lockVideos", {})) }
+        function lockStreams(): string { return JSON.stringify(PluginService.getGlobalVar(root.pluginId, "lockStreams", {})) }
         function picker(): string { return root.openPicker("") }
         function pickerMonitor(monitor: string): string { return root.openPicker(monitor) }
         function playlistCreate(name: string): string { return root.createNamedPlaylist(name) }
@@ -1328,6 +1410,11 @@ PluginComponent {
     Component.onDestruction: {
         console.info("LinuxWallpaperEngine: Plugin stopping, cleaning up processes")
         PluginService.setGlobalVar(pluginId, "lockVideos", {})
+        PluginService.setGlobalVar(pluginId, "lockStreams", {})
+        for (const monitor in lockStreamProcesses) {
+            lockStreamProcesses[monitor].running = false
+            lockStreamProcesses[monitor].destroy()
+        }
 
         for (const key in processes) {
             if (processes[key]) {

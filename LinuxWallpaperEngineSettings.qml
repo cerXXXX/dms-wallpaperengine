@@ -758,6 +758,45 @@ PluginSettings {
         }
     }
 
+    Column {
+        width: parent.width
+        spacing: 2
+
+        Row {
+            width: parent.width
+            spacing: Theme.spacingM
+
+            StyledText {
+                text: "Live Scene on Lock Screen"
+                font.pixelSize: Theme.fontSizeSmall
+                width: 180
+                anchors.verticalCenter: parent.verticalCenter
+            }
+
+            DankToggle {
+                id: lockScreenScenesToggle
+                anchors.verticalCenter: parent.verticalCenter
+
+                Binding {
+                    target: lockScreenScenesToggle
+                    property: "checked"
+                    value: loadValue("lockScreenScenes", true)
+                }
+
+                onToggled: (checked) => {
+                    saveValue("lockScreenScenes", checked)
+                }
+            }
+        }
+        StyledText {
+            text: "While the session is locked, render each screen's scene in the background and stream it to the patched DMS lock screen (wallpaper-engine-niri/dms-lock-screen). Costs some CPU/GPU while locked; scenes take a few seconds to load, the screenshot shows until then"
+            font.pixelSize: Theme.fontSizeSmall * 0.9
+            opacity: 0.5
+            width: parent.width
+            wrapMode: Text.Wrap
+        }
+    }
+
     Timer {
         id: screenshotDelayDebounceTimer
         interval: 500
