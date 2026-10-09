@@ -80,6 +80,18 @@ function buildCommandArgs(o) {
         args.push(propName + "=" + sceneProps[propName])
     }
 
+    // layers and effects the user turned off in Scene Settings (patched engine)
+    var hiddenLayers = (o.settings.hiddenLayers || []).join(",")
+    if (hiddenLayers) {
+        args.push("--hide-layer")
+        args.push(hiddenLayers)
+    }
+    var disabledEffects = (o.settings.disabledEffects || []).join(",")
+    if (disabledEffects) {
+        args.push("--disable-effect")
+        args.push(disabledEffects)
+    }
+
     if (o.settings.disableParticles) args.push("--disable-particles")
     if (o.settings.downscaleToOutput) args.push("--downscale-to-output")
     if (o.settings.disableMouse) args.push("--disable-mouse")

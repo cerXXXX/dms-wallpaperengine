@@ -17,6 +17,13 @@ A [DankMaterialShell](https://github.com/AvengeMedia/DankMaterialShell) plugin f
 >   monitor stays at 30. Untouched settings are inherited from the monitor; the reset button next to a setting inherits
 >   it again. The overrides follow the scene through playlists and span groups, and the monitor's settings page shows
 >   which ones the current scene overrides.
+> - **Scene properties as the author made them** (a scene's **Properties** → *Scene Properties*): read from
+>   `project.json` in Wallpaper Engine's order, with readable combo choices (e.g. the language) and a color picker.
+>   Properties whose `condition` doesn't hold are hidden, so a multi-language scene only shows the chosen language's
+>   options.
+> - **Layers & Effects** (same dialog): every layer the scene shows with the current properties, and each layer's
+>   effects, can be turned off. A hidden layer isn't loaded at all. Needs the patched engine (`--list-layers`,
+>   `--hide-layer`, `--disable-effect`); with a stock engine the section says so and stays empty.
 > - **Separate Scene FPS and Video FPS** per monitor: video wallpapers (`"type": "video"` in `project.json`) use
 >   Video FPS, scenes and web wallpapers use Scene FPS. The two are independent (an older config without Video FPS keeps its videos at the old FPS). A scene's own
 >   FPS override wins over both.

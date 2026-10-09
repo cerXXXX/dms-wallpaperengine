@@ -217,6 +217,8 @@ PluginComponent {
         const scene = getSceneSettings(sceneId) || {}
         const merged = Utils.mergeSceneOverrides(outputSettings[owner], scene.overrides, wallpaperType(sceneId))
         merged.properties = scene.properties || {}
+        merged.hiddenLayers = Array.isArray(scene.hiddenLayers) ? scene.hiddenLayers : []
+        merged.disabledEffects = Array.isArray(scene.disabledEffects) ? scene.disabledEffects : []
         return merged
     }
 

@@ -1336,6 +1336,18 @@ PluginSettings {
         return ""
     }
 
+    // the scene's project.json as text ("" if unreadable); not cached, the modal reads it once per open
+    function projectJsonText(sceneId) {
+        if (!sceneId) return ""
+        var candidates = Utils.projectJsonCandidates(sceneId, resolvedBackgroundsDir, steamPaths)
+        for (var i = 0; i < candidates.length; i++) {
+            projectReader.path = candidates[i]
+            var text = projectReader.text()
+            if (text) return text
+        }
+        return ""
+    }
+
     function saveOutputSetting(key, value) {
         var owner = settingsOwner
         if (!owner || owner === "span:") return
@@ -1374,8 +1386,18 @@ PluginSettings {
         return Utils.sanitizeSceneOverrides(s.overrides)
     }
 
-    // one save for both, so the daemon relaunches the scene once; undefined leaves that part as is
-    function saveSceneSettings(sceneId, props, overrides) {
+    // { hiddenLayers: [ids], disabledEffects: [ids] } the user turned off in this scene
+    function getSceneLayers(sceneId) {
+        if (!sceneId) return {}
+        var s = loadValue("sceneSettings", {})[sceneId] || {}
+        return {
+            hiddenLayers: Array.isArray(s.hiddenLayers) ? s.hiddenLayers : [],
+            disabledEffects: Array.isArray(s.disabledEffects) ? s.disabledEffects : []
+        }
+    }
+
+    // one save for all, so the daemon relaunches the scene once; undefined leaves that part as is
+    function saveSceneSettings(sceneId, props, overrides, layerChoices) {
         if (!sceneId) return
         var allSettings = Object.assign({}, loadValue("sceneSettings", {}))
         var s = Object.assign({}, allSettings[sceneId] || {})
@@ -1384,6 +1406,14 @@ PluginSettings {
             var clean = Utils.sanitizeSceneOverrides(overrides)
             if (Object.keys(clean).length > 0) s.overrides = clean
             else delete s.overrides
+        }
+        if (layerChoices !== undefined) {
+            var hidden = (layerChoices.hiddenLayers || []).filter(Number.isInteger)
+            var disabled = (layerChoices.disabledEffects || []).filter(Number.isInteger)
+            if (hidden.length > 0) s.hiddenLayers = hidden
+            else delete s.hiddenLayers
+            if (disabled.length > 0) s.disabledEffects = disabled
+            else delete s.disabledEffects
         }
         allSettings[sceneId] = s
         saveValue("sceneSettings", allSettings)
