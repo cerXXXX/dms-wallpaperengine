@@ -257,8 +257,44 @@ PluginComponent {
     onStreamLockScenesChanged: updateLockStreams()
 
     function lockScenesWanted() {
-        return ready && lockScreenScenes && (powerMode === "full" || engineHasControl)
+        return ready && lockScreenScenes && (powerMode === "full" || engineHasControl) && !lockUnderlay
             && IdleService.isShellLocked && !IdleService.monitorsOff
+    }
+
+    // The patched niri (wallpaper-engine-niri/niri, "lock-wallpaper" in its version) draws the wallpapers under a
+    // see-through lock surface: the running engine itself shows on the lock screen the moment it locks, no second
+    // engine, no stream. The patched DMS lock screen then leaves its own wallpaper out (lockUnderlay global var).
+    // The compositor can't blur it for a quickshell lock surface yet, so with "Blur Wallpaper" on (or a custom lock
+    // screen wallpaper) the lock screen keeps the stream and blurs it itself.
+    property bool niriLockWallpaper: false
+    readonly property bool lockUnderlay: niriLockWallpaper && SettingsData.lockScreenWallpaperBlur === false
+        && !SettingsData.lockScreenWallpaperPath
+    onLockUnderlayChanged: {
+        publishLockUnderlay()
+        publishLockVideos()
+        updateLockStreams()
+    }
+
+    Process {
+        id: niriProbe
+        command: ["niri", "msg", "version"]
+        stdout: SplitParser {
+            onRead: (data) => {
+                if (data.indexOf("Compositor") !== -1 && data.indexOf("lock-wallpaper") !== -1) root.niriLockWallpaper = true
+            }
+        }
+    }
+
+    // { monitor: true } for the screens whose wallpaper the compositor shows under the lock screen
+    function publishLockUnderlay() {
+        const underlay = {}
+        if (ready && lockUnderlay) {
+            for (const o of computeOutputs()) {
+                for (const m of o.monitors) underlay[m] = true
+            }
+        }
+        const current = PluginService.getGlobalVar(pluginId, "lockUnderlay", {})
+        if (!Utils.deepEqual(current, underlay)) PluginService.setGlobalVar(pluginId, "lockUnderlay", underlay)
     }
 
     readonly property int lockStreamBasePort: 41300
@@ -479,7 +515,7 @@ PluginComponent {
     // video each monitor shows: it plays that video instead of the static screenshot.
     function publishLockVideos() {
         const videos = {}
-        if (ready && powerMode === "full") {
+        if (ready && powerMode === "full" && !lockUnderlay) {
             for (const o of computeOutputs()) {
                 const info = projectInfo(ownerCurrentScene(o.owner))
                 if (!info.file) continue
@@ -1054,6 +1090,7 @@ PluginComponent {
         restartPlaylistTimers()
         publishLockVideos()
         updateLockClocks()
+        publishLockUnderlay()
     }
 
     function startOutput(key, output, sceneId, forceNoAudio) {
@@ -1271,6 +1308,7 @@ PluginComponent {
         paused = true
         publishLockVideos()
         updateLockClocks()
+        publishLockUnderlay()
         for (const key in rotationTimers) {
             rotationTimers[key].running = false
         }
@@ -1358,6 +1396,7 @@ PluginComponent {
             ready = false
             publishLockVideos()
             updateLockClocks()
+            publishLockUnderlay()
             console.info("LinuxWallpaperEngine: Toggled OFF")
         } else {
             prevGenerateStaticWallpaper = generateStaticWallpaper
@@ -1436,6 +1475,7 @@ PluginComponent {
         function lockStreams(): string { return JSON.stringify(PluginService.getGlobalVar(root.pluginId, "lockStreams", {})) }
         function lockFrames(): string { return JSON.stringify(PluginService.getGlobalVar(root.pluginId, "lockFrames", {})) }
         function lockClocks(): string { return JSON.stringify(PluginService.getGlobalVar(root.pluginId, "lockClocks", {})) }
+        function lockUnderlay(): string { return JSON.stringify(PluginService.getGlobalVar(root.pluginId, "lockUnderlay", {})) }
         function picker(): string { return root.openPicker("") }
         function pickerMonitor(monitor: string): string { return root.openPicker(monitor) }
         function playlistCreate(name: string): string { return root.createNamedPlaylist(name) }
@@ -1645,6 +1685,7 @@ PluginComponent {
         powerProfilesProbe.running = true
         // syncs once it knows what the engine can do
         engineProbe.running = true
+        niriProbe.running = true
     }
 
     Process {
@@ -1747,6 +1788,7 @@ PluginComponent {
         PluginService.setGlobalVar(pluginId, "lockStreams", {})
         PluginService.setGlobalVar(pluginId, "lockFrames", {})
         PluginService.setGlobalVar(pluginId, "lockClocks", {})
+        PluginService.setGlobalVar(pluginId, "lockUnderlay", {})
         for (const monitor in lockStreamProcesses) {
             lockStreamProcesses[monitor].running = false
             lockStreamProcesses[monitor].destroy()

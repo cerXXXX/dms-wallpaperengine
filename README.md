@@ -32,6 +32,10 @@ A [DankMaterialShell](https://github.com/AvengeMedia/DankMaterialShell) plugin f
 >   0012, from text layer names with an older engine), or said by hand. Published as `lockClocks`
 >   (`dms ipc call linuxWallpaperEngine lockClocks`); the patched DMS lock screen leaves out its own time and date
 >   while it shows the live scene that has them.
+> - **Wallpaper under the lock screen** with the patched niri (wallpaper-engine-niri `niri/`, `lock-wallpaper` in
+>   `niri msg version`) and the lock screen's *Blur Wallpaper* off: niri itself shows the running wallpaper under the
+>   see-through lock screen, so no lock screen engine or stream is started; published as `lockUnderlay`
+>   (`dms ipc call linuxWallpaperEngine lockUnderlay`) for the patched DMS lock screen.
 > - **Separate Scene FPS and Video FPS** per monitor: video wallpapers (`"type": "video"` in `project.json`) use
 >   Video FPS, scenes and web wallpapers use Scene FPS. The two are independent (an older config without Video FPS keeps its videos at the old FPS). A scene's own
 >   FPS override wins over both.
