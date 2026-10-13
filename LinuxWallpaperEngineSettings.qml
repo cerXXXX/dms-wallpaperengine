@@ -1000,7 +1000,7 @@ PluginSettings {
             }
         }
         StyledText {
-            text: "Lock screen and login screen. On, a scene that shows the time (date) shows it there, and the lock screen leaves out its own. Off, the scene's clock (date) layers are hidden there and the lock screen shows its own, as it does for scenes without one. A layer showing both goes when either is off. What a scene shows is detected; Scene Settings → \"Clock on the Lock Screen\" can say it instead"
+            text: "Lock screen and login screen. On, a scene that shows the time (date) shows it there, and the lock screen leaves out its own. Off, the scene's clock (date) layers are hidden there and the lock screen shows its own, as it does for scenes without one. A layer showing both goes when either is off. With the blur on the lock screen always shows its own (a blurred clock can't be read). What a scene shows is detected; Scene Settings → \"Clock on the Lock Screen\" can say it instead"
             font.pixelSize: Theme.fontSizeSmall * 0.9
             opacity: 0.5
             width: parent.width

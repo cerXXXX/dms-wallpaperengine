@@ -291,7 +291,8 @@ PluginComponent {
     }
     onLockBlurChanged: {
         publishLockUnderlay()
-        publishGreeterWallpaper()
+        // also publishes the login screen's
+        updateLockClocks()
     }
     onGreeterScenesChanged: publishGreeterWallpaper()
 
@@ -592,13 +593,16 @@ PluginComponent {
     // What of the time each screen's scene shows on the lock screen, published as the lockClocks global var
     // ({ monitor: { time, date } }): the patched DMS lock screen leaves out its own time and date while it shows the
     // live scene that already has them. The scene's time or date the user doesn't want there (lockWallpaperTime /
-    // lockWallpaperDate) is hidden on the lock screen (lockClockLayers) and the lock screen shows its own. Scene
+    // lockWallpaperDate, and either with the blur on: blurred, they can't be read) is hidden on the lock screen
+    // (lockClockLayers) and the lock screen shows its own. Scene
     // Settings can say what the scene shows instead of detecting it (sceneSettings[id].wallpaperClock). Detected from
     // --list-layers with the properties the scene runs with, minus the layers the user hid; cached per scene and
     // properties (the run takes ~0.1 s).
     function updateLockClocks() {
         const clocks = {}
         const hidden = {}
+        const wantTime = lockWallpaperTime && !lockBlur
+        const wantDate = lockWallpaperDate && !lockBlur
         if (ready) {
             for (const o of computeOutputs()) {
                 // a span's lock screen keeps the screenshot, whose clock is stale
@@ -609,14 +613,14 @@ PluginComponent {
                 const settings = getOutputSettings(o.owner, sceneId)
                 // the layers tell what the scene shows, and which layers to hide when the lock screen shows its own
                 let layers = null
-                if (engineListsLayers && (!chosen || !lockWallpaperTime || !lockWallpaperDate)) {
+                if (engineListsLayers && (!chosen || !wantTime || !wantDate)) {
                     const key = sceneLayersKey(sceneId, settings.properties)
                     if (sceneLayerCache[key] === undefined) loadSceneLayers(sceneId, settings.properties)
                     else layers = sceneLayerCache[key]
                 }
                 const shows = chosen || (layers ? SceneProps.wallpaperClock(layers, settings.hiddenLayers) : null)
                 if (!shows) continue
-                const lock = SceneProps.lockClock(layers || [], settings.hiddenLayers, shows, lockWallpaperTime, lockWallpaperDate)
+                const lock = SceneProps.lockClock(layers || [], settings.hiddenLayers, shows, wantTime, wantDate)
                 clocks[o.monitors[0]] = lock.clock
                 if (lock.hide.length > 0) hidden[o.monitors[0]] = lock.hide
             }
