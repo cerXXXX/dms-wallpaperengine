@@ -1459,7 +1459,8 @@ PluginSettings {
         return {
             hiddenLayers: Array.isArray(s.hiddenLayers) ? s.hiddenLayers : [],
             disabledEffects: Array.isArray(s.disabledEffects) ? s.disabledEffects : [],
-            linkLayers: s.linkLayers !== false
+            linkLayers: s.linkLayers !== false,
+            wallpaperClock: s.wallpaperClock || ""
         }
     }
 
@@ -1483,6 +1484,9 @@ PluginSettings {
             else delete s.disabledEffects
             if (layerChoices.linkLayers === false) s.linkLayers = false
             else delete s.linkLayers
+            // what the scene shows of the time for the lock screen, "" = detect it
+            if (layerChoices.wallpaperClock) s.wallpaperClock = layerChoices.wallpaperClock
+            else delete s.wallpaperClock
         }
         allSettings[sceneId] = s
         saveValue("sceneSettings", allSettings)

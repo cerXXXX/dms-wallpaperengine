@@ -366,3 +366,65 @@ function idList(ids) {
     return (Array.isArray(ids) ? ids : []).filter(function(id) { return id !== null && id !== undefined && !isNaN(Number(id)) })
         .map(function(id) { return String(Math.trunc(Number(id))) }).join(",")
 }
+
+// What of the current time the scene shows, { time, date }, for the lock screen (it leaves out its own time and
+// date when the wallpaper has them). A layer counts when the scene shows it with the current properties and the
+// user hasn't hidden it or a group it's in. The patched engine tells which layers show what from their scripts
+// ("clock", 0012); with an older one text layers are judged by name.
+function wallpaperClock(allLayers, hiddenLayers) {
+    var byId = {}
+    var hidden = {}
+    ;(allLayers || []).forEach(function(l) { byId[l.id] = l })
+    ;(hiddenLayers || []).forEach(function(id) { hidden[id] = true })
+    var fromScripts = (allLayers || []).some(function(l) { return l.clock !== undefined })
+
+    function shown(layer) {
+        for (var depth = 0; layer && depth < 64; depth++) {
+            if (layer.hidden || hidden[layer.id]) return false
+            layer = byId[layer.parent]
+        }
+        return true
+    }
+
+    var result = { time: false, date: false }
+    ;(allLayers || []).forEach(function(l) {
+        if (!shown(l)) return
+        if (fromScripts) {
+            if (l.clock && l.clock.time) result.time = true
+            if (l.clock && l.clock.date) result.date = true
+        } else if (l.type === "text") {
+            var name = String(l.name || "")
+            if (/clock|time|hour|minute|час|врем/i.test(name)) result.time = true
+            if (/date|month|weekday|дат|месяц/i.test(name)) result.date = true
+        }
+    })
+    return result
+}
+
+// the per-scene choice in Scene Settings (sceneSettings[id].wallpaperClock): "" detects it
+var WALLPAPER_CLOCK_CHOICES = [
+    { value: "", label: "Detect" },
+    { value: "both", label: "Time and date" },
+    { value: "time", label: "Time only" },
+    { value: "date", label: "Date only" },
+    { value: "none", label: "No clock" }
+]
+
+// { time, date } of a choice, null for "detect"
+function wallpaperClockChoice(choice) {
+    switch (choice) {
+    case "both": return { time: true, date: true }
+    case "time": return { time: true, date: false }
+    case "date": return { time: false, date: true }
+    case "none": return { time: false, date: false }
+    }
+    return null
+}
+
+function wallpaperClockText(clock) {
+    if (!clock) return "nothing yet"
+    if (clock.time && clock.date) return "time and date"
+    if (clock.time) return "the time"
+    if (clock.date) return "the date"
+    return "no clock"
+}
