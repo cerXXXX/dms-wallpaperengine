@@ -862,6 +862,113 @@ PluginSettings {
         }
     }
 
+    Column {
+        width: parent.width
+        spacing: 2
+
+        Row {
+            width: parent.width
+            spacing: Theme.spacingM
+
+            StyledText {
+                text: "Blur on Lock Screen"
+                font.pixelSize: Theme.fontSizeSmall
+                width: 180
+                anchors.verticalCenter: parent.verticalCenter
+            }
+
+            DankToggle {
+                id: lockBlurToggle
+                anchors.verticalCenter: parent.verticalCenter
+
+                Binding {
+                    target: lockBlurToggle
+                    property: "checked"
+                    // unset, it follows DMS's "Blur Wallpaper", which used to cover live wallpapers too
+                    value: loadValue("lockBlur", SettingsData.lockScreenWallpaperBlur !== false)
+                }
+
+                onToggled: (checked) => {
+                    saveValue("lockBlur", checked)
+                }
+            }
+        }
+        StyledText {
+            text: "Blur the live wallpaper behind the lock screen's clock and password field. DMS's own \"Blur Wallpaper\" (Settings → Lock Screen) is for static wallpapers. Off, a patched niri (lock-wallpaper) shows the running wallpaper itself the moment the screen locks; blurred, the scene is streamed to the lock screen and takes a few seconds to come up"
+            font.pixelSize: Theme.fontSizeSmall * 0.9
+            opacity: 0.5
+            width: parent.width
+            wrapMode: Text.Wrap
+        }
+    }
+
+    Column {
+        width: parent.width
+        spacing: 2
+
+        Row {
+            width: parent.width
+            spacing: Theme.spacingM
+
+            StyledText {
+                text: "Wallpaper's Time on Lock Screen"
+                font.pixelSize: Theme.fontSizeSmall
+                width: 180
+                wrapMode: Text.Wrap
+                anchors.verticalCenter: parent.verticalCenter
+            }
+
+            DankToggle {
+                id: lockWallpaperTimeToggle
+                anchors.verticalCenter: parent.verticalCenter
+
+                Binding {
+                    target: lockWallpaperTimeToggle
+                    property: "checked"
+                    value: loadValue("lockWallpaperTime", true)
+                }
+
+                onToggled: (checked) => {
+                    saveValue("lockWallpaperTime", checked)
+                }
+            }
+        }
+        Row {
+            width: parent.width
+            spacing: Theme.spacingM
+
+            StyledText {
+                text: "Wallpaper's Date on Lock Screen"
+                font.pixelSize: Theme.fontSizeSmall
+                width: 180
+                wrapMode: Text.Wrap
+                anchors.verticalCenter: parent.verticalCenter
+            }
+
+            DankToggle {
+                id: lockWallpaperDateToggle
+                anchors.verticalCenter: parent.verticalCenter
+
+                Binding {
+                    target: lockWallpaperDateToggle
+                    property: "checked"
+                    value: loadValue("lockWallpaperDate", true)
+                }
+
+                onToggled: (checked) => {
+                    saveValue("lockWallpaperDate", checked)
+                }
+            }
+        }
+        StyledText {
+            text: "On, a scene that shows the time (date) shows it on the lock screen, and the lock screen leaves out its own. Off, the lock screen hides the scene's clock (date) layers and shows its own, as it does for scenes without one. A layer showing both goes when either is off. What a scene shows is detected; Scene Settings → \"Clock on the Lock Screen\" can say it instead"
+            font.pixelSize: Theme.fontSizeSmall * 0.9
+            opacity: 0.5
+            width: parent.width
+            wrapMode: Text.Wrap
+        }
+    }
+
     Timer {
         id: screenshotDelayDebounceTimer
         interval: 500

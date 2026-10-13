@@ -367,11 +367,10 @@ function idList(ids) {
         .map(function(id) { return String(Math.trunc(Number(id))) }).join(",")
 }
 
-// What of the current time the scene shows, { time, date }, for the lock screen (it leaves out its own time and
-// date when the wallpaper has them). A layer counts when the scene shows it with the current properties and the
-// user hasn't hidden it or a group it's in. The patched engine tells which layers show what from their scripts
-// ("clock", 0012); with an older one text layers are judged by name.
-function wallpaperClock(allLayers, hiddenLayers) {
+// The layers that show the current time or date, [{ id, time, date }]. A layer counts when the scene shows it with the
+// current properties and the user hasn't hidden it or a group it's in. The patched engine tells which layers show
+// what from their scripts ("clock", 0012); with an older one text layers are judged by name.
+function clockLayers(allLayers, hiddenLayers) {
     var byId = {}
     var hidden = {}
     ;(allLayers || []).forEach(function(l) { byId[l.id] = l })
@@ -386,19 +385,59 @@ function wallpaperClock(allLayers, hiddenLayers) {
         return true
     }
 
-    var result = { time: false, date: false }
+    var result = []
     ;(allLayers || []).forEach(function(l) {
         if (!shown(l)) return
+        var time = false
+        var date = false
         if (fromScripts) {
-            if (l.clock && l.clock.time) result.time = true
-            if (l.clock && l.clock.date) result.date = true
+            time = !!(l.clock && l.clock.time)
+            date = !!(l.clock && l.clock.date)
         } else if (l.type === "text") {
             var name = String(l.name || "")
-            if (/clock|time|hour|minute|час|врем/i.test(name)) result.time = true
-            if (/date|month|weekday|дат|месяц/i.test(name)) result.date = true
+            time = /clock|time|hour|minute|час|врем/i.test(name)
+            date = /date|month|weekday|дат|месяц/i.test(name)
         }
+        if (time || date) result.push({ id: l.id, time: time, date: date })
     })
     return result
+}
+
+// What of the current time the scene shows, { time, date }, for the lock screen (it leaves out its own time and
+// date when the wallpaper has them)
+function wallpaperClock(allLayers, hiddenLayers) {
+    var result = { time: false, date: false }
+    clockLayers(allLayers, hiddenLayers).forEach(function(l) {
+        if (l.time) result.time = true
+        if (l.date) result.date = true
+    })
+    return result
+}
+
+// The lock screen's share of a scene that shows the time or the date (shows, { time, date }), given whether the user
+// wants the wallpaper's time and date there (lockWallpaperTime / lockWallpaperDate): { clock: { time, date } the lock
+// screen leaves to the scene, hide: [layer ids] the lock screen hides so it shows its own instead }. A layer with both
+// goes when either isn't wanted, and the lock screen then shows both itself.
+function lockClock(allLayers, hiddenLayers, shows, wantTime, wantDate) {
+    var layers = clockLayers(allLayers, hiddenLayers)
+    var hide = layers.filter(function(l) {
+        return (l.time && shows.time && !wantTime) || (l.date && shows.date && !wantDate)
+    })
+
+    // whether what the scene shows of it is gone with the hidden layers (the layers may not tell, e.g. when Scene
+    // Settings says the scene has a clock the engine didn't find)
+    function hiddenAll(part) {
+        var showing = layers.filter(function(l) { return l[part] })
+        return showing.length > 0 && showing.every(function(l) { return hide.indexOf(l) !== -1 })
+    }
+
+    return {
+        clock: {
+            time: shows.time && wantTime && !hiddenAll("time"),
+            date: shows.date && wantDate && !hiddenAll("date")
+        },
+        hide: hide.map(function(l) { return l.id })
+    }
 }
 
 // the per-scene choice in Scene Settings (sceneSettings[id].wallpaperClock): "" detects it

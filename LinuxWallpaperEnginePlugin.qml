@@ -40,6 +40,14 @@ PluginComponent {
     property bool ecoDisableMouse: pluginData.ecoDisableMouse !== false
     property bool ecoDisableParallax: pluginData.ecoDisableParallax !== false
     property bool lockScreenScenes: pluginData.lockScreenScenes !== false
+    // the lock screen's look for live wallpapers, apart from DMS's own settings for static ones: the blur (unset, it
+    // follows DMS's "Blur Wallpaper", which used to cover both) and whether the scene's time and date stand in for the
+    // lock screen's
+    property bool lockBlur: pluginData.lockBlur !== undefined ? pluginData.lockBlur !== false : SettingsData.lockScreenWallpaperBlur !== false
+    property bool lockWallpaperTime: pluginData.lockWallpaperTime !== false
+    property bool lockWallpaperDate: pluginData.lockWallpaperDate !== false
+    // { monitor: [layer ids] } the lock screen hides: the scene's clock layers whose time or date it shows itself
+    property var lockClockLayers: ({})
     property var lockStreamProcesses: ({})
     property string assetsDir: pluginData.assetsDir || ""
     property string backgroundsDir: pluginData.backgroundsDir || ""
@@ -61,6 +69,8 @@ PluginComponent {
     property bool engineHasControl: false
     // --list-layers (patch 0007): which layers the scene shows; with 0012 also which show the time or date
     property bool engineListsLayers: false
+    // the control channel takes "hide-layers" (leaves layers out while it runs, for the lock screen)
+    property bool engineHidesLayers: false
     // "<scene>|<properties>" -> the scene's layers, see updateLockClocks
     property var sceneLayerCache: ({})
     property bool haveMagick: false
@@ -152,16 +162,19 @@ PluginComponent {
         id: engineProbe
         property bool control: false
         property bool listLayers: false
+        property bool hideLayers: false
         command: ["linux-wallpaperengine", "--help"]
         stdout: SplitParser {
             onRead: (data) => {
                 if (data.indexOf("--control") !== -1) engineProbe.control = true
                 if (data.indexOf("--list-layers") !== -1) engineProbe.listLayers = true
+                if (data.indexOf("hide-layers") !== -1) engineProbe.hideLayers = true
             }
         }
         onExited: {
             root.engineHasControl = control
             root.engineListsLayers = listLayers
+            root.engineHidesLayers = control && hideLayers
             root.engineProbed = true
             console.info("LinuxWallpaperEngine: engine control channel", root.engineHasControl ? "available" : "missing (old engine, eco freezes it)")
             root.syncScenesWithData()
@@ -264,16 +277,21 @@ PluginComponent {
     // The patched niri (wallpaper-engine-niri/niri, "lock-wallpaper" in its version) draws the wallpapers under a
     // see-through lock surface: the running engine itself shows on the lock screen the moment it locks, no second
     // engine, no stream. The patched DMS lock screen then leaves its own wallpaper out (lockUnderlay global var).
-    // The compositor can't blur it for a quickshell lock surface yet, so with "Blur Wallpaper" on (or a custom lock
+    // The compositor can't blur it for a quickshell lock surface yet, so with the blur on (lockBlur, or a custom lock
     // screen wallpaper) the lock screen keeps the stream and blurs it itself.
     property bool niriLockWallpaper: false
-    readonly property bool lockUnderlay: niriLockWallpaper && SettingsData.lockScreenWallpaperBlur === false
-        && !SettingsData.lockScreenWallpaperPath
+    readonly property bool lockUnderlay: niriLockWallpaper && !lockBlur && !SettingsData.lockScreenWallpaperPath
     onLockUnderlayChanged: {
         publishLockUnderlay()
         publishLockVideos()
         updateLockStreams()
+        sendLockClockLayers()
     }
+    onLockBlurChanged: publishLockUnderlay()
+
+    // the running engines leave the lock screen's clock layers out while it shows them (lockUnderlay)
+    readonly property bool shellLocked: IdleService.isShellLocked
+    onShellLockedChanged: sendLockClockLayers()
 
     Process {
         id: niriProbe
@@ -295,6 +313,35 @@ PluginComponent {
         }
         const current = PluginService.getGlobalVar(pluginId, "lockUnderlay", {})
         if (!Utils.deepEqual(current, underlay)) PluginService.setGlobalVar(pluginId, "lockUnderlay", underlay)
+        publishLockBlur()
+    }
+
+    // { monitor: bool } the lockBlur setting for the screens with a live wallpaper, published as the lockBlur global
+    // var: the patched DMS lock screen blurs them by it instead of DMS's "Blur Wallpaper" (static wallpapers)
+    function publishLockBlur() {
+        const blur = {}
+        if (ready) {
+            for (const o of computeOutputs()) {
+                for (const m of o.monitors) blur[m] = lockBlur
+            }
+        }
+        const current = PluginService.getGlobalVar(pluginId, "lockBlur", {})
+        if (!Utils.deepEqual(current, blur)) PluginService.setGlobalVar(pluginId, "lockBlur", blur)
+    }
+
+    // Tells the running engines which layers to leave out: the lock screen's clock layers (lockClockLayers) while the
+    // compositor shows them under the lock screen (lockUnderlay), none otherwise. It only writes what changed.
+    function sendLockClockLayers() {
+        if (!engineHidesLayers) return
+        for (const o of computeOutputs()) {
+            const proc = processes[o.key]
+            if (!proc || !proc.control) continue
+            const ids = ready && lockUnderlay && shellLocked && o.kind === "single" ? (lockClockLayers[o.monitors[0]] || []) : []
+            const list = SceneProps.idList(ids)
+            if (proc.sentHiddenNow === list) continue
+            proc.write("hide-layers " + list + "\n")
+            proc.sentHiddenNow = list
+        }
     }
 
     readonly property int lockStreamBasePort: 41300
@@ -328,9 +375,16 @@ PluginComponent {
                 const screen = Quickshell.screens.find(s => s.name === o.monitors[0])
                 if (!screen) continue
                 const scale = screen.devicePixelRatio || 1
+                const settings = getOutputSettings(o.owner, sceneId)
+                // the clock layers whose time or date the lock screen shows itself
+                const clockLayers = lockClockLayers[o.monitors[0]] || []
+                if (clockLayers.length > 0) {
+                    settings.hiddenLayers = (settings.hiddenLayers || []).concat(clockLayers)
+                }
                 wanted[o.monitors[0]] = {
                     sceneId: sceneId,
-                    owner: o.owner,
+                    settings: settings,
+                    hiddenLayers: SceneProps.idList(settings.hiddenLayers),
                     port: lockStreamBasePort + index++,
                     frameFile: frames ? lockFramePath(o.monitors[0]) : "",
                     size: [Math.round(screen.width * scale), Math.round(screen.height * scale)]
@@ -342,7 +396,8 @@ PluginComponent {
         for (const monitor in lockStreamProcesses) {
             const proc = lockStreamProcesses[monitor]
             const want = wanted[monitor]
-            if (want && proc.sceneId === want.sceneId && proc.port === want.port && proc.frameFile === want.frameFile) continue
+            if (want && proc.sceneId === want.sceneId && proc.port === want.port && proc.frameFile === want.frameFile
+                && proc.hiddenLayers === want.hiddenLayers) continue
             proc.running = false
             proc.destroy()
             delete lockStreamProcesses[monitor]
@@ -356,6 +411,7 @@ PluginComponent {
                     sceneId: want.sceneId,
                     port: want.port,
                     frameFile: want.frameFile,
+                    hiddenLayers: want.hiddenLayers,
                     // below the shell: the lock screen and its password field come first while the scene loads
                     command: ["nice", "-n", "10"].concat(CommandBuilder.buildCommandArgs({
                         streamTarget: want.frameFile ? "" : "udp://127.0.0.1:" + want.port + "?pkt_size=1316",
@@ -363,7 +419,7 @@ PluginComponent {
                         eco: !!want.frameFile,
                         streamSize: want.size,
                         sceneId: want.sceneId,
-                        settings: getOutputSettings(want.owner, want.sceneId),
+                        settings: want.settings,
                         assetsDir: assetsDir,
                         backgroundsDir: backgroundsDir
                     }))
@@ -396,6 +452,7 @@ PluginComponent {
             property string sceneId: ""
             property int port: 0
             property string frameFile: ""
+            property string hiddenLayers: ""
             property int frames: 0
 
             stdout: SplitParser {
@@ -526,13 +583,16 @@ PluginComponent {
         if (!Utils.deepEqual(current, videos)) PluginService.setGlobalVar(pluginId, "lockVideos", videos)
     }
 
-    // Whether each screen's scene shows the time and/or the date, published as the lockClocks global var
-    // ({ monitor: { time, date } }): the patched DMS lock screen leaves out its own time and date while it shows
-    // the live scene that already has them. Scene Settings can say it instead of detecting it
-    // (sceneSettings[id].wallpaperClock). Detected from --list-layers with the properties the scene runs with,
-    // minus the layers the user hid; cached per scene and properties (the run takes ~0.1 s).
+    // What of the time each screen's scene shows on the lock screen, published as the lockClocks global var
+    // ({ monitor: { time, date } }): the patched DMS lock screen leaves out its own time and date while it shows the
+    // live scene that already has them. The scene's time or date the user doesn't want there (lockWallpaperTime /
+    // lockWallpaperDate) is hidden on the lock screen (lockClockLayers) and the lock screen shows its own. Scene
+    // Settings can say what the scene shows instead of detecting it (sceneSettings[id].wallpaperClock). Detected from
+    // --list-layers with the properties the scene runs with, minus the layers the user hid; cached per scene and
+    // properties (the run takes ~0.1 s).
     function updateLockClocks() {
         const clocks = {}
+        const hidden = {}
         if (ready) {
             for (const o of computeOutputs()) {
                 // a span's lock screen keeps the screenshot, whose clock is stale
@@ -540,23 +600,28 @@ PluginComponent {
                 const sceneId = ownerCurrentScene(o.owner, false)
                 if (projectInfo(sceneId).type !== "scene") continue
                 const chosen = SceneProps.wallpaperClockChoice(getSceneSettings(sceneId).wallpaperClock || "")
-                if (chosen) {
-                    clocks[o.monitors[0]] = chosen
-                    continue
-                }
-                if (!engineListsLayers) continue
                 const settings = getOutputSettings(o.owner, sceneId)
-                const key = sceneLayersKey(sceneId, settings.properties)
-                const layers = sceneLayerCache[key]
-                if (layers === undefined) {
-                    loadSceneLayers(sceneId, settings.properties)
-                    continue
+                // the layers tell what the scene shows, and which layers to hide when the lock screen shows its own
+                let layers = null
+                if (engineListsLayers && (!chosen || !lockWallpaperTime || !lockWallpaperDate)) {
+                    const key = sceneLayersKey(sceneId, settings.properties)
+                    if (sceneLayerCache[key] === undefined) loadSceneLayers(sceneId, settings.properties)
+                    else layers = sceneLayerCache[key]
                 }
-                clocks[o.monitors[0]] = SceneProps.wallpaperClock(layers, settings.hiddenLayers)
+                const shows = chosen || (layers ? SceneProps.wallpaperClock(layers, settings.hiddenLayers) : null)
+                if (!shows) continue
+                const lock = SceneProps.lockClock(layers || [], settings.hiddenLayers, shows, lockWallpaperTime, lockWallpaperDate)
+                clocks[o.monitors[0]] = lock.clock
+                if (lock.hide.length > 0) hidden[o.monitors[0]] = lock.hide
             }
         }
         const current = PluginService.getGlobalVar(pluginId, "lockClocks", {})
         if (!Utils.deepEqual(current, clocks)) PluginService.setGlobalVar(pluginId, "lockClocks", clocks)
+        if (!Utils.deepEqual(lockClockLayers, hidden)) {
+            lockClockLayers = hidden
+            updateLockStreams()
+            sendLockClockLayers()
+        }
     }
 
     function sceneLayersKey(sceneId, properties) {
@@ -1138,6 +1203,7 @@ PluginComponent {
         processStartTimes[key] = Date.now()
         delete pendingLaunches[key]
         if (freezeWithSignal()) scheduleFreeze(weProc)
+        sendLockClockLayers()
 
         cancelScreenshotTimer(key)
         if (useScreenshot) {
@@ -1476,6 +1542,8 @@ PluginComponent {
         function lockFrames(): string { return JSON.stringify(PluginService.getGlobalVar(root.pluginId, "lockFrames", {})) }
         function lockClocks(): string { return JSON.stringify(PluginService.getGlobalVar(root.pluginId, "lockClocks", {})) }
         function lockUnderlay(): string { return JSON.stringify(PluginService.getGlobalVar(root.pluginId, "lockUnderlay", {})) }
+        function lockBlur(): string { return JSON.stringify(PluginService.getGlobalVar(root.pluginId, "lockBlur", {})) }
+        function lockClockLayers(): string { return JSON.stringify(root.lockClockLayers) }
         function picker(): string { return root.openPicker("") }
         function pickerMonitor(monitor: string): string { return root.openPicker(monitor) }
         function playlistCreate(name: string): string { return root.createNamedPlaylist(name) }
@@ -1518,6 +1586,8 @@ PluginComponent {
             property bool launchMuted: false
             property bool sentHeld: launchHeld
             property bool sentMuted: launchMuted
+            // the layers it was told to leave out for now (sendLockClockLayers), "1,2,3"
+            property string sentHiddenNow: ""
 
             stdinEnabled: control
             command: CommandBuilder.buildCommandArgs({
@@ -1789,6 +1859,7 @@ PluginComponent {
         PluginService.setGlobalVar(pluginId, "lockFrames", {})
         PluginService.setGlobalVar(pluginId, "lockClocks", {})
         PluginService.setGlobalVar(pluginId, "lockUnderlay", {})
+        PluginService.setGlobalVar(pluginId, "lockBlur", {})
         for (const monitor in lockStreamProcesses) {
             lockStreamProcesses[monitor].running = false
             lockStreamProcesses[monitor].destroy()
