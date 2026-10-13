@@ -385,11 +385,13 @@ function projectInfoFromText(text, projectJsonPath) {
         return { type: "", file: "" }
     }
     var type = String((p && p.type) || "").toLowerCase()
+    // the wallpaper's folder, for an engine that can't look the id up (the login screen's runs as another user)
+    var dir = projectJsonPath ? projectJsonPath.substring(0, projectJsonPath.lastIndexOf("/")) : ""
     var file = ""
-    if (type === "video" && p.file && projectJsonPath) {
-        file = projectJsonPath.substring(0, projectJsonPath.lastIndexOf("/") + 1) + p.file
+    if (type === "video" && p.file && dir) {
+        file = dir + "/" + p.file
     }
-    return { type: type, file: file }
+    return { type: type, file: file, dir: dir }
 }
 
 // The output's FPS for this kind of wallpaper: videos use videoFps (the plain fps until it is set),

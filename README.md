@@ -37,7 +37,13 @@ A [DankMaterialShell](https://github.com/AvengeMedia/DankMaterialShell) plugin f
 >   A layer showing both goes when either is off. The lock screen's engine gets them as `--hide-layer`, the running
 >   engine under the patched niri as the control command `hide-layers` (engine with it in `--help`) while locked.
 >   `lockClocks` then only has what the scene keeps; the hidden layers: `dms ipc call linuxWallpaperEngine
->   lockClockLayers`.
+>   lockClockLayers`. With *Blur on Lock Screen* on both count as off: a blurred clock can't be read.
+> - **Live Scene on Login Screen** (settings, on by default): the patched dms-greeter (wallpaper-engine-niri
+>   `dms-greeter/`) runs each screen's scene or video under the login screen, with the lock screen's blur, time and
+>   date. The plugin writes what to run to `~/.local/state/DankMaterialShell/greeter-wallpaper.json`
+>   (`dms ipc call linuxWallpaperEngine greeterWallpaper` prints the path): the engine command with the wallpaper's
+>   folder and the assets by path, as the greeter's engine runs as the greeter user; the file is what the next
+>   login screen shows, so it stays when DMS stops.
 > - **Blur on Lock Screen** (settings): the blur of the live wallpaper on the lock screen, apart from DMS's own
 >   *Blur Wallpaper* (static wallpapers, custom lock screen wallpaper); unset, it follows DMS's toggle. Published as
 >   `lockBlur` (`dms ipc call linuxWallpaperEngine lockBlur`) for the patched DMS lock screen.

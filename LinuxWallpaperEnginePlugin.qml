@@ -46,6 +46,8 @@ PluginComponent {
     property bool lockBlur: pluginData.lockBlur !== undefined ? pluginData.lockBlur !== false : SettingsData.lockScreenWallpaperBlur !== false
     property bool lockWallpaperTime: pluginData.lockWallpaperTime !== false
     property bool lockWallpaperDate: pluginData.lockWallpaperDate !== false
+    // the scene runs live under the login screen too (wallpaper-engine-niri/dms-greeter), see publishGreeterWallpaper
+    property bool greeterScenes: pluginData.greeterScenes !== false
     // { monitor: [layer ids] } the lock screen hides: the scene's clock layers whose time or date it shows itself
     property var lockClockLayers: ({})
     property var lockStreamProcesses: ({})
@@ -287,7 +289,12 @@ PluginComponent {
         updateLockStreams()
         sendLockClockLayers()
     }
-    onLockBlurChanged: publishLockUnderlay()
+    onLockBlurChanged: {
+        publishLockUnderlay()
+        // also publishes the login screen's
+        updateLockClocks()
+    }
+    onGreeterScenesChanged: publishGreeterWallpaper()
 
     // the running engines leave the lock screen's clock layers out while it shows them (lockUnderlay)
     readonly property bool shellLocked: IdleService.isShellLocked
@@ -586,13 +593,16 @@ PluginComponent {
     // What of the time each screen's scene shows on the lock screen, published as the lockClocks global var
     // ({ monitor: { time, date } }): the patched DMS lock screen leaves out its own time and date while it shows the
     // live scene that already has them. The scene's time or date the user doesn't want there (lockWallpaperTime /
-    // lockWallpaperDate) is hidden on the lock screen (lockClockLayers) and the lock screen shows its own. Scene
+    // lockWallpaperDate, and either with the blur on: blurred, they can't be read) is hidden on the lock screen
+    // (lockClockLayers) and the lock screen shows its own. Scene
     // Settings can say what the scene shows instead of detecting it (sceneSettings[id].wallpaperClock). Detected from
     // --list-layers with the properties the scene runs with, minus the layers the user hid; cached per scene and
     // properties (the run takes ~0.1 s).
     function updateLockClocks() {
         const clocks = {}
         const hidden = {}
+        const wantTime = lockWallpaperTime && !lockBlur
+        const wantDate = lockWallpaperDate && !lockBlur
         if (ready) {
             for (const o of computeOutputs()) {
                 // a span's lock screen keeps the screenshot, whose clock is stale
@@ -603,14 +613,14 @@ PluginComponent {
                 const settings = getOutputSettings(o.owner, sceneId)
                 // the layers tell what the scene shows, and which layers to hide when the lock screen shows its own
                 let layers = null
-                if (engineListsLayers && (!chosen || !lockWallpaperTime || !lockWallpaperDate)) {
+                if (engineListsLayers && (!chosen || !wantTime || !wantDate)) {
                     const key = sceneLayersKey(sceneId, settings.properties)
                     if (sceneLayerCache[key] === undefined) loadSceneLayers(sceneId, settings.properties)
                     else layers = sceneLayerCache[key]
                 }
                 const shows = chosen || (layers ? SceneProps.wallpaperClock(layers, settings.hiddenLayers) : null)
                 if (!shows) continue
-                const lock = SceneProps.lockClock(layers || [], settings.hiddenLayers, shows, lockWallpaperTime, lockWallpaperDate)
+                const lock = SceneProps.lockClock(layers || [], settings.hiddenLayers, shows, wantTime, wantDate)
                 clocks[o.monitors[0]] = lock.clock
                 if (lock.hide.length > 0) hidden[o.monitors[0]] = lock.hide
             }
@@ -622,6 +632,66 @@ PluginComponent {
             updateLockStreams()
             sendLockClockLayers()
         }
+        publishGreeterWallpaper()
+    }
+
+    // The login screen: the patched dms-greeter (wallpaper-engine-niri/dms-greeter) runs the scene of each screen
+    // under it, as the greeter user, before anyone logs in, so it reads what to run from a file
+    // (~/.local/state/DankMaterialShell/greeter-wallpaper.json): { outputs: { monitor: { command, clock, blur } } }.
+    // The command names the wallpaper's folder and the assets by path (the greeter's engine can't look the id up in
+    // a Steam folder of its own); clock and blur are the lock screen's (lockClocks, lockClockLayers, lockBlur). The
+    // file outlives DMS: it's what the next login screen shows, so it's only rewritten while the plugin runs.
+    readonly property string greeterWallpaperPath: Paths.strip(StandardPaths.writableLocation(StandardPaths.HomeLocation).toString())
+        + "/.local/state/DankMaterialShell/greeter-wallpaper.json"
+
+    function greeterAssetsDir() {
+        if (assetsDir) return assetsDir
+        return steamWorkshopPath.replace(/\/workshop\/content\/431960$/, "/common/wallpaper_engine/assets")
+    }
+
+    function publishGreeterWallpaper() {
+        if (!ready) return
+        const outputs = {}
+        if (greeterScenes) {
+            const clocks = PluginService.getGlobalVar(pluginId, "lockClocks", {})
+            for (const o of computeOutputs()) {
+                // a span would need one engine across the screens; the login screen keeps its wallpaper there
+                if (o.kind !== "single") continue
+                const monitor = o.monitors[0]
+                const sceneId = ownerCurrentScene(o.owner, false)
+                const info = projectInfo(sceneId)
+                if ((info.type !== "scene" && info.type !== "video") || !info.dir) continue
+                const settings = getOutputSettings(o.owner, sceneId)
+                const clockLayers = lockClockLayers[monitor] || []
+                if (clockLayers.length > 0) settings.hiddenLayers = (settings.hiddenLayers || []).concat(clockLayers)
+                outputs[monitor] = {
+                    command: CommandBuilder.buildCommandArgs({
+                        screenMode: "root",
+                        screenValue: monitor,
+                        sceneId: info.dir,
+                        settings: settings,
+                        forceNoAudio: true,
+                        assetsDir: greeterAssetsDir()
+                    }),
+                    clock: clocks[monitor] || { time: false, date: false },
+                    blur: lockBlur
+                }
+            }
+        }
+        const text = JSON.stringify({ outputs: outputs }, null, 2) + "\n"
+        if (greeterWallpaperFile.written === text) return
+        greeterWallpaperFile.written = text
+        greeterWallpaperFile.setText(text)
+    }
+
+    FileView {
+        id: greeterWallpaperFile
+        // what this run last wrote
+        property string written: ""
+        path: root.greeterWallpaperPath
+        blockLoading: true
+        atomicWrites: true
+        printErrors: false
     }
 
     function sceneLayersKey(sceneId, properties) {
@@ -1544,6 +1614,7 @@ PluginComponent {
         function lockUnderlay(): string { return JSON.stringify(PluginService.getGlobalVar(root.pluginId, "lockUnderlay", {})) }
         function lockBlur(): string { return JSON.stringify(PluginService.getGlobalVar(root.pluginId, "lockBlur", {})) }
         function lockClockLayers(): string { return JSON.stringify(root.lockClockLayers) }
+        function greeterWallpaper(): string { return root.greeterWallpaperPath }
         function picker(): string { return root.openPicker("") }
         function pickerMonitor(monitor: string): string { return root.openPicker(monitor) }
         function playlistCreate(name: string): string { return root.createNamedPlaylist(name) }
