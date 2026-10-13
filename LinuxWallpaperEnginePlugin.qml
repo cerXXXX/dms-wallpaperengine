@@ -46,6 +46,8 @@ PluginComponent {
     property bool lockBlur: pluginData.lockBlur !== undefined ? pluginData.lockBlur !== false : SettingsData.lockScreenWallpaperBlur !== false
     property bool lockWallpaperTime: pluginData.lockWallpaperTime !== false
     property bool lockWallpaperDate: pluginData.lockWallpaperDate !== false
+    // the scene runs live under the login screen too (wallpaper-engine-niri/dms-greeter), see publishGreeterWallpaper
+    property bool greeterScenes: pluginData.greeterScenes !== false
     // { monitor: [layer ids] } the lock screen hides: the scene's clock layers whose time or date it shows itself
     property var lockClockLayers: ({})
     property var lockStreamProcesses: ({})
@@ -287,7 +289,11 @@ PluginComponent {
         updateLockStreams()
         sendLockClockLayers()
     }
-    onLockBlurChanged: publishLockUnderlay()
+    onLockBlurChanged: {
+        publishLockUnderlay()
+        publishGreeterWallpaper()
+    }
+    onGreeterScenesChanged: publishGreeterWallpaper()
 
     // the running engines leave the lock screen's clock layers out while it shows them (lockUnderlay)
     readonly property bool shellLocked: IdleService.isShellLocked
@@ -622,6 +628,66 @@ PluginComponent {
             updateLockStreams()
             sendLockClockLayers()
         }
+        publishGreeterWallpaper()
+    }
+
+    // The login screen: the patched dms-greeter (wallpaper-engine-niri/dms-greeter) runs the scene of each screen
+    // under it, as the greeter user, before anyone logs in, so it reads what to run from a file
+    // (~/.local/state/DankMaterialShell/greeter-wallpaper.json): { outputs: { monitor: { command, clock, blur } } }.
+    // The command names the wallpaper's folder and the assets by path (the greeter's engine can't look the id up in
+    // a Steam folder of its own); clock and blur are the lock screen's (lockClocks, lockClockLayers, lockBlur). The
+    // file outlives DMS: it's what the next login screen shows, so it's only rewritten while the plugin runs.
+    readonly property string greeterWallpaperPath: Paths.strip(StandardPaths.writableLocation(StandardPaths.HomeLocation).toString())
+        + "/.local/state/DankMaterialShell/greeter-wallpaper.json"
+
+    function greeterAssetsDir() {
+        if (assetsDir) return assetsDir
+        return steamWorkshopPath.replace(/\/workshop\/content\/431960$/, "/common/wallpaper_engine/assets")
+    }
+
+    function publishGreeterWallpaper() {
+        if (!ready) return
+        const outputs = {}
+        if (greeterScenes) {
+            const clocks = PluginService.getGlobalVar(pluginId, "lockClocks", {})
+            for (const o of computeOutputs()) {
+                // a span would need one engine across the screens; the login screen keeps its wallpaper there
+                if (o.kind !== "single") continue
+                const monitor = o.monitors[0]
+                const sceneId = ownerCurrentScene(o.owner, false)
+                const info = projectInfo(sceneId)
+                if ((info.type !== "scene" && info.type !== "video") || !info.dir) continue
+                const settings = getOutputSettings(o.owner, sceneId)
+                const clockLayers = lockClockLayers[monitor] || []
+                if (clockLayers.length > 0) settings.hiddenLayers = (settings.hiddenLayers || []).concat(clockLayers)
+                outputs[monitor] = {
+                    command: CommandBuilder.buildCommandArgs({
+                        screenMode: "root",
+                        screenValue: monitor,
+                        sceneId: info.dir,
+                        settings: settings,
+                        forceNoAudio: true,
+                        assetsDir: greeterAssetsDir()
+                    }),
+                    clock: clocks[monitor] || { time: false, date: false },
+                    blur: lockBlur
+                }
+            }
+        }
+        const text = JSON.stringify({ outputs: outputs }, null, 2) + "\n"
+        if (greeterWallpaperFile.written === text) return
+        greeterWallpaperFile.written = text
+        greeterWallpaperFile.setText(text)
+    }
+
+    FileView {
+        id: greeterWallpaperFile
+        // what this run last wrote
+        property string written: ""
+        path: root.greeterWallpaperPath
+        blockLoading: true
+        atomicWrites: true
+        printErrors: false
     }
 
     function sceneLayersKey(sceneId, properties) {
@@ -1544,6 +1610,7 @@ PluginComponent {
         function lockUnderlay(): string { return JSON.stringify(PluginService.getGlobalVar(root.pluginId, "lockUnderlay", {})) }
         function lockBlur(): string { return JSON.stringify(PluginService.getGlobalVar(root.pluginId, "lockBlur", {})) }
         function lockClockLayers(): string { return JSON.stringify(root.lockClockLayers) }
+        function greeterWallpaper(): string { return root.greeterWallpaperPath }
         function picker(): string { return root.openPicker("") }
         function pickerMonitor(monitor: string): string { return root.openPicker(monitor) }
         function playlistCreate(name: string): string { return root.createNamedPlaylist(name) }

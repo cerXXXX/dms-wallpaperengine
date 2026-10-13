@@ -871,6 +871,45 @@ PluginSettings {
             spacing: Theme.spacingM
 
             StyledText {
+                text: "Live Scene on Login Screen"
+                font.pixelSize: Theme.fontSizeSmall
+                width: 180
+                anchors.verticalCenter: parent.verticalCenter
+            }
+
+            DankToggle {
+                id: greeterScenesToggle
+                anchors.verticalCenter: parent.verticalCenter
+
+                Binding {
+                    target: greeterScenesToggle
+                    property: "checked"
+                    value: loadValue("greeterScenes", true)
+                }
+
+                onToggled: (checked) => {
+                    saveValue("greeterScenes", checked)
+                }
+            }
+        }
+        StyledText {
+            text: "The login screen (dms-greeter) runs each screen's scene or video live under it, with the blur, time and date settings below. Needs wallpaper-engine-niri/dms-greeter installed; the screenshot shows until the scene is up"
+            font.pixelSize: Theme.fontSizeSmall * 0.9
+            opacity: 0.5
+            width: parent.width
+            wrapMode: Text.Wrap
+        }
+    }
+
+    Column {
+        width: parent.width
+        spacing: 2
+
+        Row {
+            width: parent.width
+            spacing: Theme.spacingM
+
+            StyledText {
                 text: "Blur on Lock Screen"
                 font.pixelSize: Theme.fontSizeSmall
                 width: 180
@@ -894,7 +933,7 @@ PluginSettings {
             }
         }
         StyledText {
-            text: "Blur the live wallpaper behind the lock screen's clock and password field. DMS's own \"Blur Wallpaper\" (Settings → Lock Screen) is for static wallpapers. Off, a patched niri (lock-wallpaper) shows the running wallpaper itself the moment the screen locks; blurred, the scene is streamed to the lock screen and takes a few seconds to come up"
+            text: "Blur the live wallpaper behind the clock and password field of the lock screen and the login screen. DMS's own \"Blur Wallpaper\" (Settings → Lock Screen) is for static wallpapers. Off, a patched niri (lock-wallpaper) shows the running wallpaper itself the moment the screen locks; blurred, the scene is streamed to the lock screen and takes a few seconds to come up"
             font.pixelSize: Theme.fontSizeSmall * 0.9
             opacity: 0.5
             width: parent.width
@@ -961,7 +1000,7 @@ PluginSettings {
             }
         }
         StyledText {
-            text: "On, a scene that shows the time (date) shows it on the lock screen, and the lock screen leaves out its own. Off, the lock screen hides the scene's clock (date) layers and shows its own, as it does for scenes without one. A layer showing both goes when either is off. What a scene shows is detected; Scene Settings → \"Clock on the Lock Screen\" can say it instead"
+            text: "Lock screen and login screen. On, a scene that shows the time (date) shows it there, and the lock screen leaves out its own. Off, the scene's clock (date) layers are hidden there and the lock screen shows its own, as it does for scenes without one. A layer showing both goes when either is off. What a scene shows is detected; Scene Settings → \"Clock on the Lock Screen\" can say it instead"
             font.pixelSize: Theme.fontSizeSmall * 0.9
             opacity: 0.5
             width: parent.width
