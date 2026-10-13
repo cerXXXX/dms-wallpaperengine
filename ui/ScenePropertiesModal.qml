@@ -30,6 +30,11 @@ DankModal {
     // turning a layer off turns off its copies too (other languages, other layouts)
     property bool linkLayers: true
     property var layerLinks: ({ layers: {}, effects: {} })
+    // every layer as --list-layers prints it (with "clock" from engine patch 0012)
+    property var allLayers: []
+    // what the scene shows of the time for the lock screen: "" detects it, see SceneProps.WALLPAPER_CLOCK_CHOICES
+    property string wallpaperClock: ""
+    readonly property var detectedClock: layersSupported && allLayers.length > 0 ? SceneProps.wallpaperClock(allLayers, hiddenLayers) : null
     // pending per-scene render overrides (fps, scaling, audio, ...), saved on Apply
     property var overrideValues: ({})
     property var pluginSettings: null
@@ -52,9 +57,11 @@ DankModal {
             overrideValues = {}
             layers = []
             layerLinks = { layers: {}, effects: {} }
+            allLayers = []
             hiddenLayers = []
             disabledEffects = []
             linkLayers = true
+            wallpaperClock = ""
         })
     }
 
@@ -431,6 +438,76 @@ DankModal {
                     Column {
                         width: parent.width
                         spacing: Theme.spacingS
+                        visible: wallpaperType === "scene"
+
+                        StyledText {
+                            text: "Clock on the Lock Screen"
+                            font.pixelSize: Theme.fontSizeMedium
+                            font.weight: Font.Bold
+                        }
+
+                        StyledText {
+                            text: {
+                                var intro = "While the lock screen shows this scene live, it leaves out its own time and date when the scene already shows them (DMS Settings → Lock Screen). "
+                                if (!layersSupported) return intro + "Detecting it needs the updated linux-wallpaperengine; until then say it here."
+                                if (layersLoading && allLayers.length === 0) return intro + "Detecting..."
+                                var byNames = allLayers.length > 0 && !allLayers.some(function(l) { return l.clock !== undefined })
+                                return intro + "Detected: " + SceneProps.wallpaperClockText(detectedClock)
+                                    + (byNames ? " (from the layer names; the updated engine reads the layers' scripts)" : "") + "."
+                            }
+                            font.pixelSize: Theme.fontSizeSmall
+                            opacity: 0.7
+                            width: parent.width
+                            wrapMode: Text.Wrap
+                        }
+
+                        Rectangle {
+                            width: parent.width
+                            height: clockRow.implicitHeight + Theme.spacingM * 2
+                            color: Theme.surface
+                            radius: Theme.cornerRadius
+                            border.width: 1
+                            border.color: Theme.outline
+
+                            Item {
+                                id: clockRow
+                                anchors.fill: parent
+                                anchors.margins: Theme.spacingM
+                                implicitHeight: Math.max(clockLabel.implicitHeight, clockChoice.height)
+
+                                StyledText {
+                                    id: clockLabel
+                                    anchors.left: parent.left
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: "This scene shows"
+                                    font.pixelSize: Theme.fontSizeSmall
+                                    font.weight: wallpaperClock !== "" ? Font.Bold : Font.Normal
+                                    color: wallpaperClock !== "" ? Theme.primary : Theme.surfaceText
+                                }
+
+                                DankDropdown {
+                                    id: clockChoice
+                                    anchors.right: parent.right
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    dropdownWidth: 220
+                                    compactMode: true
+                                    options: SceneProps.WALLPAPER_CLOCK_CHOICES.map(function(c) { return c.label })
+                                    currentValue: {
+                                        var choice = SceneProps.WALLPAPER_CLOCK_CHOICES.find(function(c) { return c.value === wallpaperClock })
+                                        return choice ? choice.label : SceneProps.WALLPAPER_CLOCK_CHOICES[0].label
+                                    }
+                                    onValueChanged: (newValue) => {
+                                        var choice = SceneProps.WALLPAPER_CLOCK_CHOICES.find(function(c) { return c.label === newValue })
+                                        wallpaperClock = choice ? choice.value : ""
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Column {
+                        width: parent.width
+                        spacing: Theme.spacingS
 
                         StyledText {
                             text: "Render Settings for This Scene"
@@ -547,7 +624,7 @@ DankModal {
                 DankButton {
                     text: "Reset to Defaults"
                     enabled: allProperties.length > 0 || Object.keys(overrideValues).length > 0
-                             || hiddenLayers.length > 0 || disabledEffects.length > 0
+                             || hiddenLayers.length > 0 || disabledEffects.length > 0 || wallpaperClock !== ""
                     onClicked: resetToDefaults()
                 }
 
@@ -905,6 +982,7 @@ DankModal {
         hiddenLayers = saved.hiddenLayers || []
         disabledEffects = saved.disabledEffects || []
         linkLayers = saved.linkLayers !== false
+        wallpaperClock = saved.wallpaperClock || ""
     }
 
     function setLayerShown(id, shown) {
@@ -982,6 +1060,7 @@ DankModal {
         onExited: (code) => {
             if (code === 0) {
                 var all = SceneProps.parseLayerData(output)
+                allLayers = all
                 layers = SceneProps.visibleLayerTree(all)
                 layerLinks = SceneProps.layerLinks(all)
             }
@@ -1000,7 +1079,8 @@ DankModal {
             pluginSettings.saveSceneSettings(sceneId, allProperties.length > 0 ? currentValues : undefined, overrideValues, {
                 hiddenLayers: hiddenLayers,
                 disabledEffects: disabledEffects,
-                linkLayers: linkLayers
+                linkLayers: linkLayers,
+                wallpaperClock: wallpaperClock
             })
         }
     }
@@ -1011,5 +1091,6 @@ DankModal {
         hiddenLayers = []
         disabledEffects = []
         linkLayers = true
+        wallpaperClock = ""
     }
 }

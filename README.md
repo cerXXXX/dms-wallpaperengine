@@ -27,6 +27,11 @@ A [DankMaterialShell](https://github.com/AvengeMedia/DankMaterialShell) plugin f
 >   multi-language scene; a group whose name differs between copies is matched by its children's names. Needs the
 >   patched engine (`--list-layers`, `--hide-layer`, `--disable-effect`); with a stock engine the section says so and
 >   stays empty.
+> - **Clock on the Lock Screen** (same dialog): whether the scene shows the time and/or the date, detected from the
+>   layers it shows with the current properties minus the hidden ones (from the layers' scripts with engine patch
+>   0012, from text layer names with an older engine), or said by hand. Published as `lockClocks`
+>   (`dms ipc call linuxWallpaperEngine lockClocks`); the patched DMS lock screen leaves out its own time and date
+>   while it shows the live scene that has them.
 > - **Separate Scene FPS and Video FPS** per monitor: video wallpapers (`"type": "video"` in `project.json`) use
 >   Video FPS, scenes and web wallpapers use Scene FPS. The two are independent (an older config without Video FPS keeps its videos at the old FPS). A scene's own
 >   FPS override wins over both.

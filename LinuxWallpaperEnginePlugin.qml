@@ -9,6 +9,7 @@ import qs.Modules.Plugins
 import "ui"
 import "js/Utils.js" as Utils
 import "js/CommandBuilder.js" as CommandBuilder
+import "js/SceneProperties.js" as SceneProps
 
 PluginComponent {
     id: root
@@ -58,6 +59,10 @@ PluginComponent {
     // the installed engine takes --control/--eco (patch 0009); probed once before the first launch
     property bool engineProbed: false
     property bool engineHasControl: false
+    // --list-layers (patch 0007): which layers the scene shows; with 0012 also which show the time or date
+    property bool engineListsLayers: false
+    // "<scene>|<properties>" -> the scene's layers, see updateLockClocks
+    property var sceneLayerCache: ({})
     property bool haveMagick: false
     property bool paused: false
     property bool pickerOpen: false
@@ -145,12 +150,22 @@ PluginComponent {
 
     Process {
         id: engineProbe
-        command: ["sh", "-c", "linux-wallpaperengine --help 2>/dev/null | grep -q -- --control"]
-        onExited: (code) => {
-            root.engineHasControl = code === 0
+        property bool control: false
+        property bool listLayers: false
+        command: ["linux-wallpaperengine", "--help"]
+        stdout: SplitParser {
+            onRead: (data) => {
+                if (data.indexOf("--control") !== -1) engineProbe.control = true
+                if (data.indexOf("--list-layers") !== -1) engineProbe.listLayers = true
+            }
+        }
+        onExited: {
+            root.engineHasControl = control
+            root.engineListsLayers = listLayers
             root.engineProbed = true
             console.info("LinuxWallpaperEngine: engine control channel", root.engineHasControl ? "available" : "missing (old engine, eco freezes it)")
             root.syncScenesWithData()
+            root.updateLockClocks()
         }
     }
 
@@ -473,6 +488,87 @@ PluginComponent {
         }
         const current = PluginService.getGlobalVar(pluginId, "lockVideos", {})
         if (!Utils.deepEqual(current, videos)) PluginService.setGlobalVar(pluginId, "lockVideos", videos)
+    }
+
+    // Whether each screen's scene shows the time and/or the date, published as the lockClocks global var
+    // ({ monitor: { time, date } }): the patched DMS lock screen leaves out its own time and date while it shows
+    // the live scene that already has them. Scene Settings can say it instead of detecting it
+    // (sceneSettings[id].wallpaperClock). Detected from --list-layers with the properties the scene runs with,
+    // minus the layers the user hid; cached per scene and properties (the run takes ~0.1 s).
+    function updateLockClocks() {
+        const clocks = {}
+        if (ready) {
+            for (const o of computeOutputs()) {
+                // a span's lock screen keeps the screenshot, whose clock is stale
+                if (o.kind !== "single") continue
+                const sceneId = ownerCurrentScene(o.owner, false)
+                if (projectInfo(sceneId).type !== "scene") continue
+                const chosen = SceneProps.wallpaperClockChoice(getSceneSettings(sceneId).wallpaperClock || "")
+                if (chosen) {
+                    clocks[o.monitors[0]] = chosen
+                    continue
+                }
+                if (!engineListsLayers) continue
+                const settings = getOutputSettings(o.owner, sceneId)
+                const key = sceneLayersKey(sceneId, settings.properties)
+                const layers = sceneLayerCache[key]
+                if (layers === undefined) {
+                    loadSceneLayers(sceneId, settings.properties)
+                    continue
+                }
+                clocks[o.monitors[0]] = SceneProps.wallpaperClock(layers, settings.hiddenLayers)
+            }
+        }
+        const current = PluginService.getGlobalVar(pluginId, "lockClocks", {})
+        if (!Utils.deepEqual(current, clocks)) PluginService.setGlobalVar(pluginId, "lockClocks", clocks)
+    }
+
+    function sceneLayersKey(sceneId, properties) {
+        return sceneId + "|" + JSON.stringify(properties || {})
+    }
+
+    // one --list-layers run at a time; the others wait in sceneLayersQueue
+    property var sceneLayersQueue: []
+
+    function loadSceneLayers(sceneId, properties) {
+        const key = sceneLayersKey(sceneId, properties)
+        if (sceneLayersLoader.key === key || sceneLayersQueue.some(q => q.key === key)) return
+        sceneLayersQueue = sceneLayersQueue.concat([{ key: key, sceneId: sceneId, properties: properties || {} }])
+        if (!sceneLayersLoader.running) nextSceneLayers()
+    }
+
+    function nextSceneLayers() {
+        if (sceneLayersQueue.length === 0) {
+            sceneLayersLoader.key = ""
+            return
+        }
+        const next = sceneLayersQueue[0]
+        sceneLayersQueue = sceneLayersQueue.slice(1)
+        const cmd = ["linux-wallpaperengine", Utils.resolveBgArg(next.sceneId, backgroundsDir), "--list-layers"]
+        if (assetsDir) cmd.push("--assets-dir", assetsDir)
+        for (const name in next.properties) cmd.push("--set-property", name + "=" + next.properties[name])
+        sceneLayersLoader.key = next.key
+        sceneLayersLoader.output = ""
+        sceneLayersLoader.command = cmd
+        sceneLayersLoader.running = true
+    }
+
+    Process {
+        id: sceneLayersLoader
+        property string key: ""
+        property string output: ""
+        stdout: SplitParser {
+            onRead: (data) => { sceneLayersLoader.output += data + "\n" }
+        }
+        onExited: (code) => {
+            const cache = Object.assign({}, root.sceneLayerCache)
+            // a failed run counts as no layers, so it isn't retried on every sync
+            cache[key] = code === 0 ? SceneProps.parseLayerData(output) : []
+            root.sceneLayerCache = cache
+            output = ""
+            root.nextSceneLayers()
+            root.updateLockClocks()
+        }
     }
 
     FileView {
@@ -957,6 +1053,7 @@ PluginComponent {
 
         restartPlaylistTimers()
         publishLockVideos()
+        updateLockClocks()
     }
 
     function startOutput(key, output, sceneId, forceNoAudio) {
@@ -1173,6 +1270,7 @@ PluginComponent {
     function pauseOutputs() {
         paused = true
         publishLockVideos()
+        updateLockClocks()
         for (const key in rotationTimers) {
             rotationTimers[key].running = false
         }
@@ -1259,6 +1357,7 @@ PluginComponent {
             stopAllOutputs()
             ready = false
             publishLockVideos()
+            updateLockClocks()
             console.info("LinuxWallpaperEngine: Toggled OFF")
         } else {
             prevGenerateStaticWallpaper = generateStaticWallpaper
@@ -1336,6 +1435,7 @@ PluginComponent {
         function lockVideos(): string { return JSON.stringify(PluginService.getGlobalVar(root.pluginId, "lockVideos", {})) }
         function lockStreams(): string { return JSON.stringify(PluginService.getGlobalVar(root.pluginId, "lockStreams", {})) }
         function lockFrames(): string { return JSON.stringify(PluginService.getGlobalVar(root.pluginId, "lockFrames", {})) }
+        function lockClocks(): string { return JSON.stringify(PluginService.getGlobalVar(root.pluginId, "lockClocks", {})) }
         function picker(): string { return root.openPicker("") }
         function pickerMonitor(monitor: string): string { return root.openPicker(monitor) }
         function playlistCreate(name: string): string { return root.createNamedPlaylist(name) }
@@ -1646,6 +1746,7 @@ PluginComponent {
         PluginService.setGlobalVar(pluginId, "lockVideos", {})
         PluginService.setGlobalVar(pluginId, "lockStreams", {})
         PluginService.setGlobalVar(pluginId, "lockFrames", {})
+        PluginService.setGlobalVar(pluginId, "lockClocks", {})
         for (const monitor in lockStreamProcesses) {
             lockStreamProcesses[monitor].running = false
             lockStreamProcesses[monitor].destroy()
