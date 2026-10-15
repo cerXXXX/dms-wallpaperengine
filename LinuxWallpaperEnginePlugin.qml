@@ -1806,9 +1806,27 @@ PluginComponent {
                 if (!SessionData.perMonitorWallpaper) {
                     SessionData.setPerMonitorWallpaper(true)
                 }
+                const bridgeActive = PluginService.isPluginLoaded("weDashBridge")
+                const galleryDir = root.screenshotDir().replace(/\/we_screenshots$/, "/we_gallery")
+                const galleryFile = galleryDir + "/" + sceneId + ".jpg"
+
                 for (const m of wallpaperMonitors) {
-                    console.info("LinuxWallpaperEngine: Set wp on", m, "to", screenshotPath)
-                    SessionData.setMonitorWallpaper(m, screenshotPath)
+                    const curWp = SessionData.getMonitorWallpaper(m) || SessionData.wallpaperPath || ""
+
+                    if (bridgeActive) {
+                        Quickshell.execDetached(["bash", "-c", 'mkdir -p "$(dirname "$2")" && cp -f "$1" "$2.tmp" && mv -f "$2.tmp" "$2"', "_", screenshotPath, galleryFile])
+                        if (curWp === galleryFile) {
+                            continue
+                        }
+                        console.info("LinuxWallpaperEngine: Set wp on", m, "to", galleryFile)
+                        SessionData.setMonitorWallpaper(m, galleryFile)
+                    } else {
+                        if (curWp === screenshotPath) {
+                            continue
+                        }
+                        console.info("LinuxWallpaperEngine: Set wp on", m, "to", screenshotPath)
+                        SessionData.setMonitorWallpaper(m, screenshotPath)
+                    }
                 }
                 destroy()
             }
